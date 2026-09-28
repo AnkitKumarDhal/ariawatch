@@ -1,6 +1,10 @@
 fn main() {
-    println!("ariawatch");
-    println!("—————————");
-    println!("watching an existing aria2 deamon");
-    println!("Rust is powering this client.");
+    let name = "ariawatch";
+    let mut version = "0.0.1";
+
+    println!("{name}");
+    println!("version: {version}");
+
+    version = "0.0.2";
+    println!("version: {version}");
 }
