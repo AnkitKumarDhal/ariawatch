@@ -1,12 +1,10 @@
 fn print_version(name: &str, version: &str) {
     println!("{name} v{version}");
 
-    let stage = if version == "0.0.1" {
-        "bootstrap"
-    } else if version == "0.0.2" {
-        "foundation"
-    } else {
-        "future release"
+    let stage = match version {
+        "0.0.1" => "bootstrap",
+        "0.0.2" => "foundations",
+        _ => "future release",
     };
 
     println!("stage: {stage}");
@@ -19,10 +17,8 @@ fn main() {
     print_version(name, version);
 
     version = "0.0.2";
-
     print_version(name, version);
 
     version = "0.0.3";
-
     print_version(name, version);
 }
