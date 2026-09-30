@@ -12,13 +12,10 @@ fn print_version(name: &str, version: &str) {
 
 fn main() {
     let name = "ariawatch";
-    let mut version = "0.0.1";
+    let versions = ["0.0.1", "0.0.2", "0.0.3"];
 
-    print_version(name, version);
-
-    version = "0.0.2";
-    print_version(name, version);
-
-    version = "0.0.3";
-    print_version(name, version);
+    for version in &versions {
+        print_version(name, version);
+        println!("")
+    }
 }
