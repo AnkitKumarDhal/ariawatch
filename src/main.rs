@@ -8,13 +8,21 @@ fn describe_release(version: &str) -> String {
     format!("ariawatch v{version} - {stage}")
 }
 
+fn format_releases(version: &str, stage: &str) -> String {
+    format!("ariawatch v{version} - {stage}")
+}
+
 fn main() {
     let mut versions = Vec::new();
+    let mut stage = Vec::new();
 
     versions.push("0.0.1");
     versions.push("0.0.2");
     versions.push("0.0.3");
-    versions.push("0.0.4");
+
+    stage.push("bootstrap");
+    stage.push("foundations");
+    stage.push("future release");
 
     for version in &versions {
         println!("{version}");
@@ -22,6 +30,11 @@ fn main() {
 
     for version in &versions {
         let msg = describe_release(version);
+        println!("{msg}")
+    }
+
+    for i in 0..versions.len() {
+        let msg = format_releases(versions[i], stage[i]);
         println!("{msg}")
     }
 }
