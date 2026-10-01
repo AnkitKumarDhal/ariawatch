@@ -9,7 +9,16 @@ fn describe_release(version: &str) -> String {
 }
 
 fn main() {
-    let versions = ["0.0.1", "0.0.2", "0.0.3"];
+    let mut versions = Vec::new();
+
+    versions.push("0.0.1");
+    versions.push("0.0.2");
+    versions.push("0.0.3");
+    versions.push("0.0.4");
+
+    for version in &versions {
+        println!("{version}");
+    }
 
     for version in &versions {
         let msg = describe_release(version);
