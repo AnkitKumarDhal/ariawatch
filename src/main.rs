@@ -38,3 +38,12 @@ fn main() {
         println!("{msg}")
     }
 }
+
+#[test]
+fn test_format_releases() {
+    let version = "0.0.1";
+    let stage = "bootstrap";
+    let expected = "ariawatch v0.0.1 - bootstrap";
+    let result = format_releases(version, stage);
+    assert_eq!(result, expected);
+}
