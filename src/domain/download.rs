@@ -8,3 +8,9 @@ pub struct Download {
     pub speed: u64,
     pub status: Status,
 }
+
+impl Download {
+    pub fn summary(&self) -> String {
+        format!("{} - {} bytes/s", self.name, self.speed)
+    }
+}

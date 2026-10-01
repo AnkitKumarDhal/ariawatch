@@ -21,5 +21,5 @@ fn main() {
         Status::Complete => "Download Complete",
     };
 
-    println!("{} -> {}: {} bytes/s", stat, download.name, download.speed);
+    println!("{} -> {}", stat, download.summary());
 }
