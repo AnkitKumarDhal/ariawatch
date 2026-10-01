@@ -13,4 +13,22 @@ impl Download {
     pub fn summary(&self) -> String {
         format!("{} - {} bytes/s", self.name, self.speed)
     }
+
+    pub fn new(
+        gid: String,
+        name: String,
+        size: u64,
+        downloaded: u64,
+        speed: u64,
+        status: Status,
+    ) -> Self {
+        Self {
+            gid,
+            name,
+            size,
+            downloaded,
+            speed,
+            status,
+        }
+    }
 }
