@@ -1,49 +1,14 @@
-fn describe_release(version: &str) -> String {
-    let stage = match version {
-        "0.0.1" => "bootstrap",
-        "0.0.2" => "foundations",
-        _ => "future release",
-    };
-
-    format!("ariawatch v{version} - {stage}")
-}
-
-fn format_releases(version: &str, stage: &str) -> String {
-    format!("ariawatch v{version} - {stage}")
-}
+mod domain;
+use domain::download::Download;
 
 fn main() {
-    let mut versions = Vec::new();
-    let mut stage = Vec::new();
+    let download = Download {
+        gid: String::from("abc123"),
+        name: String::from("something"),
+        size: 4_000_000_000,
+        downloaded: 2_000_000_000,
+        speed: 8_000_000,
+    };
 
-    versions.push("0.0.1");
-    versions.push("0.0.2");
-    versions.push("0.0.3");
-
-    stage.push("bootstrap");
-    stage.push("foundations");
-    stage.push("future release");
-
-    for version in &versions {
-        println!("{version}");
-    }
-
-    for version in &versions {
-        let msg = describe_release(version);
-        println!("{msg}")
-    }
-
-    for i in 0..versions.len() {
-        let msg = format_releases(versions[i], stage[i]);
-        println!("{msg}")
-    }
-}
-
-#[test]
-fn test_format_releases() {
-    let version = "0.0.1";
-    let stage = "bootstrap";
-    let expected = "ariawatch v0.0.1 - bootstrap";
-    let result = format_releases(version, stage);
-    assert_eq!(result, expected);
+    println!("{}: {} bytes/s", download.name, download.speed)
 }
