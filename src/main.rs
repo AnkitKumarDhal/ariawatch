@@ -12,5 +12,14 @@ fn main() {
         status: Status::Active,
     };
 
-    println!("{}: {} bytes/s", download.name, download.speed)
+    let stat = match download.status {
+        Status::Active => "Downloading",
+        Status::Error => "Download Error",
+        Status::Paused => "Download Paused",
+        Status::Waiting => "Waiting for Download",
+        Status::Removed => "Download Removed",
+        Status::Complete => "Download Complete",
+    };
+
+    println!("{} -> {}: {} bytes/s", stat, download.name, download.speed);
 }
