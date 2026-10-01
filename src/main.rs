@@ -1,5 +1,6 @@
 mod domain;
 use domain::download::Download;
+use domain::status::Status;
 
 fn main() {
     let download = Download {
@@ -8,6 +9,7 @@ fn main() {
         size: 4_000_000_000,
         downloaded: 2_000_000_000,
         speed: 8_000_000,
+        status: Status::Active,
     };
 
     println!("{}: {} bytes/s", download.name, download.speed)
