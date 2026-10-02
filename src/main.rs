@@ -22,5 +22,8 @@ fn main() {
     };
 
     println!("{} -> {}", stat, download.summary());
-    println!("{download:?}")
+    println!("{download:?}");
+    if download.status == Status::Active {
+        println!("\nIts downloading dawg")
+    }
 }
