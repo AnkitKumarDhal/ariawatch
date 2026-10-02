@@ -21,6 +21,8 @@ fn main() {
         Status::Active,
     );
 
+    let download3 = &download1;
+
     let stat = match download2.status {
         Status::Active => "Downloading",
         Status::Error => "Download Error",
@@ -43,4 +45,6 @@ fn main() {
     if download1 == download2 {
         println!("Both are the same downloads nigga")
     }
+
+    println!("{}", download3.summary());
 }
