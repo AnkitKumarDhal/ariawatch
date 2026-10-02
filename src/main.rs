@@ -21,6 +21,10 @@ fn main() {
         Status::Complete => "Download Complete",
     };
 
+    let status_copy = download.status.clone();
+
+    println!("{status_copy:?}");
+
     println!("{} -> {}", stat, download.summary());
     println!("{download:?}");
     if download.status == Status::Active {
