@@ -2,7 +2,16 @@ mod domain;
 use domain::download::Download;
 use domain::status::Status;
 
+fn change_name(name: &mut String) {
+    name.push_str(" - watching")
+}
+
 fn main() {
+    let mut name = String::from("ariawatch");
+    change_name(&mut name);
+
+    println!("\n{name}");
+
     let download1 = Download::new(
         String::from("abc123"),
         String::from("CONTROL: Resonant"),
@@ -21,7 +30,7 @@ fn main() {
         Status::Active,
     );
 
-    let download3 = &download1;
+    let download3 = &download2;
 
     let stat = match download2.status {
         Status::Active => "Downloading",
