@@ -33,3 +33,32 @@ impl Download {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::download::Download;
+    use crate::domain::status::Status;
+
+    #[test]
+    fn constructor_testing() {
+        let actual = Download::new(
+            String::from("xyz098"),
+            String::from("Anything"),
+            14_000_000_000,
+            4_000_000_000,
+            8_000_000,
+            Status::Waiting,
+        );
+
+        let expected = Download {
+            gid: String::from("xyz098"),
+            name: String::from("Anything"),
+            size: 14_000_000_000,
+            downloaded: 4_000_000_000,
+            speed: 8_000_000,
+            status: Status::Waiting,
+        };
+
+        assert_eq!(actual, expected);
+    }
+}
