@@ -1,6 +1,6 @@
 use crate::domain::status::Status;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Download {
     pub gid: String,
     pub name: String,
