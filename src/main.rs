@@ -22,4 +22,5 @@ fn main() {
     };
 
     println!("{} -> {}", stat, download.summary());
+    println!("{download:?}")
 }
