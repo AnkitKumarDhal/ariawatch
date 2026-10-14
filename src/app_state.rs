@@ -18,4 +18,8 @@ impl AppState {
     pub fn download_count(&self) -> usize {
         self.downloads.len()
     }
+
+    pub fn downloads(&self) -> &[Download] {
+        &self.downloads
+    }
 }

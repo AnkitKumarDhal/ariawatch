@@ -5,6 +5,8 @@ use app_state::AppState;
 use domain::download::Download;
 use domain::status::Status;
 
+use crate::domain::download;
+
 fn change_name(name: &mut String) {
     name.push_str(" - watching")
 }
@@ -65,5 +67,9 @@ fn main() {
     state.add_download(download1);
     state.add_download(download2);
 
-    println!("Tracked downloads: {}", state.download_count())
+    println!("Tracked downloads: {}", state.download_count());
+
+    for download in state.downloads() {
+        println!("{}", download.summary())
+    }
 }
