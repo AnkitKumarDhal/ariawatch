@@ -32,6 +32,10 @@ impl Download {
             status,
         }
     }
+
+    pub fn remaining_bytes(&self) -> u64 {
+        self.size.saturating_sub(self.downloaded)
+    }
 }
 
 #[cfg(test)]
@@ -58,6 +62,23 @@ mod tests {
             speed: 8_000_000,
             status: Status::Waiting,
         };
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn remaining_bytes_testing() {
+        let download = Download::new(
+            String::from("xyz098"),
+            String::from("Anything"),
+            14_000_000_000,
+            4_000_000_000,
+            8_000_000,
+            Status::Waiting,
+        );
+
+        let actual = download.remaining_bytes();
+        let expected = 10_000_000_000;
 
         assert_eq!(actual, expected);
     }
