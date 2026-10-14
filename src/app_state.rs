@@ -11,8 +11,15 @@ impl AppState {
         }
     }
 
-    pub fn add_download(&mut self, download: Download) {
+    pub fn add_download(&mut self, download: Download) -> Result<(), String> {
+        for existing in &self.downloads {
+            if existing.gid == download.gid {
+                return Err(format!("Download with GID {} already exists", download.gid));
+            }
+        }
+
         self.downloads.push(download);
+        Ok(())
     }
 
     pub fn download_count(&self) -> usize {

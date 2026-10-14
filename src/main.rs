@@ -1,6 +1,8 @@
 mod app_state;
 mod domain;
 
+use core::error;
+
 use app_state::AppState;
 use domain::download::Download;
 use domain::status::Status;
@@ -33,37 +35,16 @@ fn main() {
         Status::Active,
     );
 
-    let download3 = &download2;
-
-    let stat = match download2.status {
-        Status::Active => "Downloading",
-        Status::Error => "Download Error",
-        Status::Paused => "Download Paused",
-        Status::Waiting => "Waiting for Download",
-        Status::Removed => "Download Removed",
-        Status::Complete => "Download Complete",
-    };
-
-    let status_copy = download1.status.clone();
-
-    println!("{status_copy:?}");
-
-    println!("{} -> {}", stat, download1.summary());
-    println!("{download1:?}");
-    if download1.status == Status::Active {
-        println!("\nIts downloading dawg")
-    }
-
-    if download1 == download2 {
-        println!("Both are the same downloads nigga")
-    }
-
-    println!("{}", download3.summary());
-
     let mut state = AppState::new();
 
-    state.add_download(download1);
-    state.add_download(download2);
+    match state.add_download(download1) {
+        Ok(()) => println!("Added first download"),
+        Err(error) => eprintln!("Could not add first download {error}"),
+    }
+    match state.add_download(download2) {
+        Ok(()) => println!("Added second download"),
+        Err(error) => eprintln!("Could not add second download {error}"),
+    }
 
     println!("Tracked downloads: {}", state.download_count());
 
