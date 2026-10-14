@@ -1,4 +1,4 @@
-use crate::domain::download::{self, Download};
+use crate::domain::download::Download;
 
 pub struct AppState {
     downloads: Vec<Download>,
