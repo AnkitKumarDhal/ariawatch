@@ -15,22 +15,30 @@ fn main() {
 
     println!("\n{name}");
 
+    let status = match Status::from_aria2("active") {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("Invalid mock status: {error}");
+            return;
+        }
+    };
+
     let download1 = Download::new(
         String::from("abc123"),
         String::from("CONTROL: Resonant"),
         38_000_000_000,
         14_000_000_000,
         7_000_000,
-        Status::Active,
+        status.clone(),
     );
 
     let download2 = Download::new(
-        String::from("abc123"),
+        String::from("somehthing"),
         String::from("CONTROL: Resonant"),
         38_000_000_000,
         14_000_000_000,
         7_000_000,
-        Status::Active,
+        status,
     );
 
     let mut state = AppState::new();
