@@ -5,8 +5,6 @@ use app_state::AppState;
 use domain::download::Download;
 use domain::status::Status;
 
-use crate::domain::download;
-
 fn change_name(name: &mut String) {
     name.push_str(" - watching")
 }
@@ -69,7 +67,24 @@ fn main() {
 
     println!("Tracked downloads: {}", state.download_count());
 
+    println!(
+        "\n{:32} {:<14} {:>10} {:>14}",
+        "Name", "Status", "Progress", "Remaining"
+    );
+    println!("{}", "-".repeat(75));
+
     for download in state.downloads() {
-        println!("{}", download.summary())
+        let progress = match download.percentage_downloaded() {
+            Some(percent) => format!("{percent:.1}%"),
+            None => String::from("N/A"),
+        };
+
+        println!(
+            "{:<32} {:<14} {:>10} {:>10.2} GiB",
+            download.name,
+            download.status.label(),
+            progress,
+            download.remaining_bytes() as f64 / 1024.0 / 1024.0 / 1024.0
+        )
     }
 }
