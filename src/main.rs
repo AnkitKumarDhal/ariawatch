@@ -1,4 +1,7 @@
+mod app_state;
 mod domain;
+
+use app_state::AppState;
 use domain::download::Download;
 use domain::status::Status;
 
@@ -56,4 +59,11 @@ fn main() {
     }
 
     println!("{}", download3.summary());
+
+    let mut state = AppState::new();
+
+    state.add_download(download1);
+    state.add_download(download2);
+
+    println!("Tracked downloads: {}", state.download_count())
 }
