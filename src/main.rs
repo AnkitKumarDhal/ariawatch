@@ -1,8 +1,6 @@
 mod app_state;
 mod domain;
 
-use core::error;
-
 use app_state::AppState;
 use domain::download::Download;
 use domain::status::Status;
@@ -36,6 +34,8 @@ fn main() {
     );
 
     let mut state = AppState::new();
+
+    println!("{}", download2.summary());
 
     match state.add_download(download1) {
         Ok(()) => println!("Added first download"),

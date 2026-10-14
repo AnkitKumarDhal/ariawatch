@@ -11,13 +11,17 @@ impl AppState {
         }
     }
 
-    pub fn add_download(&mut self, download: Download) -> Result<(), String> {
+    fn ensure_unique_gid(&self, gid: &str) -> Result<(), String> {
         for existing in &self.downloads {
-            if existing.gid == download.gid {
-                return Err(format!("Download with GID {} already exists", download.gid));
+            if existing.gid == gid {
+                return Err(format!("Download with GID {} already exists", gid));
             }
         }
+        Ok(())
+    }
 
+    pub fn add_download(&mut self, download: Download) -> Result<(), String> {
+        self.ensure_unique_gid(&download.gid)?;
         self.downloads.push(download);
         Ok(())
     }
