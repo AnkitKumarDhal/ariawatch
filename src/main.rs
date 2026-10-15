@@ -1,4 +1,5 @@
 mod app_state;
+mod aria2;
 mod domain;
 
 use app_state::AppState;
@@ -15,6 +16,30 @@ fn main() {
 
     println!("\n{name}");
 
+    let total_size = match aria2::parse_u64_field("totalLength", "38000000000") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("Could not parse download size: {error}");
+            return;
+        }
+    };
+
+    let downloaded_size = match aria2::parse_u64_field("completedLength", "14000000000") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("Could not parse downloaded size: {error}");
+            return;
+        }
+    };
+
+    let download_speed = match aria2::parse_u64_field("downloadSpeed", "7000000") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("Could not parse download speed: {error}");
+            return;
+        }
+    };
+
     let status = match Status::from_aria2("active") {
         Ok(status) => status,
         Err(error) => {
@@ -26,18 +51,18 @@ fn main() {
     let download1 = Download::new(
         String::from("abc123"),
         String::from("CONTROL: Resonant"),
-        38_000_000_000,
-        14_000_000_000,
-        7_000_000,
+        total_size,
+        downloaded_size,
+        download_speed,
         status.clone(),
     );
 
     let download2 = Download::new(
         String::from("somehthing"),
-        String::from("CONTROL: Resonant"),
-        38_000_000_000,
-        14_000_000_000,
-        7_000_000,
+        String::from("Sekiro: Shadows Die Twice"),
+        total_size,
+        downloaded_size,
+        download_speed,
         status,
     );
 
