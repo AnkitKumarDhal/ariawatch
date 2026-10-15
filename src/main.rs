@@ -31,6 +31,16 @@ fn main() {
 }
 "#;
 
+    let request_json = match aria2::build_get_version_request() {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("Could not build aria2 request: {error}");
+            return;
+        }
+    };
+
+    println!("JSON-RPC request: {request_json}");
+
     let response = match aria2::parse_download_response(mock_json) {
         Ok(response) => response,
         Err(error) => {

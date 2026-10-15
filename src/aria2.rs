@@ -1,8 +1,16 @@
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::{download::Download, status::Status};
+
+#[derive(Debug, Serialize)]
+pub struct Aria2RpcRequest {
+    pub jsonrpc: String,
+    pub id: String,
+    pub method: String,
+    pub params: Vec<serde_json::Value>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Aria2FileResponse {
@@ -28,6 +36,18 @@ pub fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
     value
         .parse::<u64>()
         .map_err(|error| format!("Invalid string for {field_name}: {error}"))
+}
+
+pub fn build_get_version_request() -> Result<String, String> {
+    let request = Aria2RpcRequest {
+        jsonrpc: String::from("2.0"),
+        id: String::from("ariawatch-1"),
+        method: String::from("aria2.getVersion"),
+        params: Vec::new(),
+    };
+
+    serde_json::to_string(&request)
+        .map_err(|error| format!("Could not serialize JSON RPC request: {error}"))
 }
 
 impl Aria2DownloadResponse {
