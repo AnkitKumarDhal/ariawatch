@@ -41,6 +41,27 @@ fn main() {
 
     println!("JSON-RPC request: {request_json}");
 
+    let mock_rpc_response = r#"
+{
+    "jsonrpc": "2.0",
+    "id": "ariawatch-1",
+    "result": {
+        "version": "1.37.0",
+        "enabledFeatures": ["HTTPS", "BitTorrent"]
+    }
+}
+"#;
+
+    let rpc_response = match aria2::parse_rpc_response(mock_rpc_response) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("Could not parse rpc response: {error}");
+            return;
+        }
+    };
+
+    println!("Parse rpc response: {rpc_response:#?}");
+
     let response = match aria2::parse_download_response(mock_json) {
         Ok(response) => response,
         Err(error) => {

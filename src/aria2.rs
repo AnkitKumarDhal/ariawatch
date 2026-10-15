@@ -1,8 +1,12 @@
+use crate::domain::{download::Download, status::Status};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-
-use crate::domain::{download::Download, status::Status};
+#[derive(Debug, Deserialize)]
+pub struct Aria2RpcError {
+    pub code: u64,
+    pub message: String,
+}
 
 #[derive(Debug, Serialize)]
 pub struct Aria2RpcRequest {
@@ -10,6 +14,14 @@ pub struct Aria2RpcRequest {
     pub id: String,
     pub method: String,
     pub params: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Aria2RpcResponse {
+    pub jsonrpc: String,
+    pub id: String,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<Aria2RpcError>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,6 +38,10 @@ pub struct Aria2DownloadResponse {
     pub completed_length: String,
     pub download_speed: String,
     pub files: Vec<Aria2FileResponse>,
+}
+
+pub fn parse_rpc_response(json: &str) -> Result<Aria2RpcResponse, String> {
+    serde_json::from_str(json).map_err(|error| format!("Invalid JSON RPC response: {error}"))
 }
 
 pub fn parse_download_response(json: &str) -> Result<Aria2DownloadResponse, String> {
