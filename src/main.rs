@@ -16,7 +16,25 @@ fn main() {
 
     println!("\n{name}");
 
-    let total_size = match aria2::parse_u64_field("totalLength", "38000000000") {
+    let mock_json = r#"
+{
+    "gid": "abc123",
+    "status": "active",
+    "totalLength": "38000000000",
+    "completedLength": "14000000000",
+    "downloadSpeed": "7000000"
+}
+"#;
+
+    let response = match aria2::parse_download_response(mock_json) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("Could not parse aria2 repsonse: {error}");
+            return;
+        }
+    };
+
+    let total_size = match aria2::parse_u64_field("totalLength", &response.total_length) {
         Ok(value) => value,
         Err(error) => {
             eprintln!("Could not parse download size: {error}");
@@ -24,15 +42,16 @@ fn main() {
         }
     };
 
-    let downloaded_size = match aria2::parse_u64_field("completedLength", "14000000000") {
-        Ok(value) => value,
-        Err(error) => {
-            eprintln!("Could not parse downloaded size: {error}");
-            return;
-        }
-    };
+    let downloaded_size =
+        match aria2::parse_u64_field("completedLength", &response.completed_length) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("Could not parse downloaded size: {error}");
+                return;
+            }
+        };
 
-    let download_speed = match aria2::parse_u64_field("downloadSpeed", "7000000") {
+    let download_speed = match aria2::parse_u64_field("downloadSpeed", &response.download_speed) {
         Ok(value) => value,
         Err(error) => {
             eprintln!("Could not parse download speed: {error}");
@@ -40,7 +59,7 @@ fn main() {
         }
     };
 
-    let status = match Status::from_aria2("active") {
+    let status = match Status::from_aria2(&response.status) {
         Ok(status) => status,
         Err(error) => {
             eprintln!("Invalid mock status: {error}");
@@ -49,7 +68,7 @@ fn main() {
     };
 
     let download1 = Download::new(
-        String::from("abc123"),
+        String::from(&response.gid),
         String::from("CONTROL: Resonant"),
         total_size,
         downloaded_size,
