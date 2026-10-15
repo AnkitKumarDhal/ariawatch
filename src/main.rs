@@ -22,7 +22,12 @@ fn main() {
     "status": "active",
     "totalLength": "38000000000",
     "completedLength": "14000000000",
-    "downloadSpeed": "7000000"
+    "downloadSpeed": "7000000",
+    "files": [
+        {
+          "path": "/downloads/CONTROL Resonant.mkv"
+        }
+    ]
 }
 "#;
 
@@ -67,14 +72,13 @@ fn main() {
         }
     };
 
-    let download1 = Download::new(
-        String::from(&response.gid),
-        String::from("CONTROL: Resonant"),
-        total_size,
-        downloaded_size,
-        download_speed,
-        status.clone(),
-    );
+    let download1 = match response.into_download() {
+        Ok(download) => download,
+        Err(error) => {
+            eprintln!("Could not convert aria2 response: {error}");
+            return;
+        }
+    };
 
     let download2 = Download::new(
         String::from("somehthing"),
