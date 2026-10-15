@@ -60,7 +60,15 @@ fn main() {
         }
     };
 
-    println!("Parse rpc response: {rpc_response:#?}");
+    let rpc_result = match rpc_response.into_result("ariawatch-1") {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("RPC request failed: {error}");
+            return;
+        }
+    };
+
+    println!("RPC result: {rpc_result:#?}");
 
     let response = match aria2::parse_download_response(mock_json) {
         Ok(response) => response,

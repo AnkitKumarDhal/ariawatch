@@ -4,7 +4,7 @@ use std::path::Path;
 
 #[derive(Debug, Deserialize)]
 pub struct Aria2RpcError {
-    pub code: u64,
+    pub code: i64,
     pub message: String,
 }
 
@@ -64,6 +64,34 @@ pub fn build_get_version_request() -> Result<String, String> {
 
     serde_json::to_string(&request)
         .map_err(|error| format!("Could not serialize JSON RPC request: {error}"))
+}
+
+impl Aria2RpcResponse {
+    pub fn into_result(self, expected_id: &str) -> Result<serde_json::Value, String> {
+        if self.jsonrpc != "2.0" {
+            return Err(format!("Unexpected JSON-RPC version: {}", self.jsonrpc));
+        }
+
+        if self.id != expected_id {
+            return Err(format!(
+                "Response ID mismatch: expected {expected_id} got {}",
+                self.id
+            ));
+        }
+
+        match (self.result, self.error) {
+            (Some(result), None) => Ok(result),
+            (None, Some(error)) => {
+                Err(format!("aria2 rpc error {}: {}", error.code, error.message))
+            }
+            (Some(_), Some(_)) => Err(format!(
+                "Invalid RPC response: both result and error fields populated"
+            )),
+            (None, None) => Err(format!(
+                "Invalid RPC response: neither result nor error fields populated"
+            )),
+        }
+    }
 }
 
 impl Aria2DownloadResponse {
