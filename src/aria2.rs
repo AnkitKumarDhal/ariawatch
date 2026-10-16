@@ -54,22 +54,45 @@ pub fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
         .map_err(|error| format!("Invalid string for {field_name}: {error}"))
 }
 
-pub fn build_get_version_request(rpc_secret: Option<&str>) -> Result<String, String> {
-    let mut params = Vec::new();
+pub fn parse_download_list(value: serde_json::Value) -> Result<Vec<Aria2DownloadResponse>, String> {
+    serde_json::from_value(value).map_err(|error| format!("Invalid aria2 download list: {error}"))
+}
 
+pub fn build_rpc_request(
+    method: &str,
+    mut params: Vec<serde_json::Value>,
+    rpc_secret: Option<&str>,
+) -> Result<String, String> {
     if let Some(secret) = rpc_secret {
-        params.push(serde_json::Value::String(format!("token:{secret}")));
+        params.insert(0, serde_json::Value::String(format!("token: {secret}")));
     }
 
     let request = Aria2RpcRequest {
         jsonrpc: String::from("2.0"),
         id: String::from("ariawatch-1"),
-        method: String::from("aria2.getVersion"),
-        params: params,
+        method: method.to_owned(),
+        params,
     };
 
     serde_json::to_string(&request)
-        .map_err(|error| format!("Could not serialize JSON RPC request: {error}"))
+        .map_err(|error| format!("Could not serialize rpc request: {error}"))
+}
+
+pub fn build_get_version_request(rpc_secret: Option<&str>) -> Result<String, String> {
+    build_rpc_request("aria2.getVersion", Vec::new(), rpc_secret)
+}
+
+pub fn build_tell_active_request(rpc_secret: Option<&str>) -> Result<String, String> {
+    let keys = serde_json::json!([
+        "gid",
+        "status",
+        "totalLength",
+        "completedLength",
+        "downloadSpeed",
+        "files"
+    ]);
+
+    build_rpc_request("aria2.tellActive", vec![keys], rpc_secret)
 }
 
 pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, String> {

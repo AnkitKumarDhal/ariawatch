@@ -70,6 +70,46 @@ fn main() {
 
     println!("Aria2 getVersion result: {rpc_result:#}");
 
+    let active_request_json = match aria2::build_tell_active_request(rpc_secret.as_deref()) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("Could not fetch tellActive request: {error}");
+            return;
+        }
+    };
+
+    let active_response_json = match aria2::send_rpc_request(&endpoint, &active_request_json) {
+        Ok(body) => body,
+        Err(error) => {
+            eprintln!("Could not fetch active downloads: {error}");
+            return;
+        }
+    };
+
+    let active_rpc_json = match aria2::parse_rpc_response(&active_response_json) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("Could not parse tellActive response: {error}");
+            return;
+        }
+    };
+
+    let active_rpc_result = match active_rpc_json.into_result("ariawatch-1") {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("tellActive failed: {error}");
+            return;
+        }
+    };
+
+    let active_response = match aria2::parse_download_list(active_rpc_result) {
+        Ok(downloads) => downloads,
+        Err(error) => {
+            eprintln!("Could not decode active downloads: {error}");
+            return;
+        }
+    };
+
     let response = match aria2::parse_download_response(mock_json) {
         Ok(response) => response,
         Err(error) => {
@@ -111,7 +151,7 @@ fn main() {
         }
     };
 
-    let download1 = match response.into_download() {
+    let _download1 = match response.into_download() {
         Ok(download) => download,
         Err(error) => {
             eprintln!("Could not convert aria2 response: {error}");
@@ -119,7 +159,7 @@ fn main() {
         }
     };
 
-    let download2 = Download::new(
+    let _download2 = Download::new(
         String::from("somehthing"),
         String::from("Sekiro: Shadows Die Twice"),
         total_size,
@@ -130,15 +170,18 @@ fn main() {
 
     let mut state = AppState::new();
 
-    println!("{}", download2.summary());
+    for response in active_response {
+        let download = match response.into_download() {
+            Ok(download) => download,
+            Err(error) => {
+                eprintln!("Skipping invalid download: {error}");
+                return;
+            }
+        };
 
-    match state.add_download(download1) {
-        Ok(()) => println!("Added first download"),
-        Err(error) => eprintln!("Could not add first download {error}"),
-    }
-    match state.add_download(download2) {
-        Ok(()) => println!("Added second download"),
-        Err(error) => eprintln!("Could not add second download {error}"),
+        if let Err(error) = state.add_download(download) {
+            eprintln!("Could not track download: {error}");
+        }
     }
 
     println!("Tracked downloads: {}", state.download_count());
