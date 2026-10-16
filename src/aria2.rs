@@ -54,16 +54,41 @@ pub fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
         .map_err(|error| format!("Invalid string for {field_name}: {error}"))
 }
 
-pub fn build_get_version_request() -> Result<String, String> {
+pub fn build_get_version_request(rpc_secret: Option<&str>) -> Result<String, String> {
+    let mut params = Vec::new();
+
+    if let Some(secret) = rpc_secret {
+        params.push(serde_json::Value::String(format!("token:{secret}")));
+    }
+
     let request = Aria2RpcRequest {
         jsonrpc: String::from("2.0"),
         id: String::from("ariawatch-1"),
         method: String::from("aria2.getVersion"),
-        params: Vec::new(),
+        params: params,
     };
 
     serde_json::to_string(&request)
         .map_err(|error| format!("Could not serialize JSON RPC request: {error}"))
+}
+
+pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|error| format!("Could not create HTTP Client: {error}"))?;
+
+    let response = client
+        .post(endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(request_json.to_owned())
+        .send()
+        .map_err(|error| format!("Could not reach aria2 rpc endpoint: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("aria2 returned an HTTP error: {error}"))?;
+    response
+        .text()
+        .map_err(|error| format!("Could not read aria2 response: {error}"))
 }
 
 impl Aria2RpcResponse {

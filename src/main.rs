@@ -31,31 +31,31 @@ fn main() {
 }
 "#;
 
-    let request_json = match aria2::build_get_version_request() {
+    let endpoint = std::env::var("ARIA2_RPC_URL")
+        .unwrap_or_else(|_| String::from("http://127.0.0.1:6800/jsonrpc"));
+    let rpc_secret = std::env::var("ARIA2_RPC_SECRET").ok();
+    let request_json = match aria2::build_get_version_request(rpc_secret.as_deref()) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("Could not build aria2 request: {error}");
+            eprintln!("Could not build RPC request: {error}");
             return;
         }
     };
 
-    println!("JSON-RPC request: {request_json}");
+    println!("Calling with aria2.getVersion at {endpoint}");
 
-    let mock_rpc_response = r#"
-{
-    "jsonrpc": "2.0",
-    "id": "ariawatch-1",
-    "result": {
-        "version": "1.37.0",
-        "enabledFeatures": ["HTTPS", "BitTorrent"]
-    }
-}
-"#;
+    let response_json = match aria2::send_rpc_request(&endpoint, &request_json) {
+        Ok(body) => body,
+        Err(error) => {
+            eprintln!("{error}");
+            return;
+        }
+    };
 
-    let rpc_response = match aria2::parse_rpc_response(mock_rpc_response) {
+    let rpc_response = match aria2::parse_rpc_response(&response_json) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("Could not parse rpc response: {error}");
+            eprintln!("Could not pass rpc request: {error}");
             return;
         }
     };
@@ -63,12 +63,12 @@ fn main() {
     let rpc_result = match rpc_response.into_result("ariawatch-1") {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("RPC request failed: {error}");
+            eprintln!("RPC Request failed: {error}");
             return;
         }
     };
 
-    println!("RPC result: {rpc_result:#?}");
+    println!("Aria2 getVersion result: {rpc_result:#}");
 
     let response = match aria2::parse_download_response(mock_json) {
         Ok(response) => response,
