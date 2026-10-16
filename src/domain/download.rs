@@ -11,10 +11,6 @@ pub struct Download {
 }
 
 impl Download {
-    pub fn summary(&self) -> String {
-        format!("{} - {} bytes/s", self.name, self.speed)
-    }
-
     pub fn new(
         gid: String,
         name: String,
@@ -42,7 +38,7 @@ impl Download {
             return None;
         }
         let percent = (self.downloaded as f64 / self.size as f64) * 100.0;
-        return Some(percent.min(100.0));
+        Some(percent.min(100.0))
     }
 }
 

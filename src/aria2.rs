@@ -44,11 +44,7 @@ pub fn parse_rpc_response(json: &str) -> Result<Aria2RpcResponse, String> {
     serde_json::from_str(json).map_err(|error| format!("Invalid JSON RPC response: {error}"))
 }
 
-pub fn parse_download_response(json: &str) -> Result<Aria2DownloadResponse, String> {
-    serde_json::from_str(json).map_err(|error| format!("Invalid aria2 JSON response: {error}"))
-}
-
-pub fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
+fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
     value
         .parse::<u64>()
         .map_err(|error| format!("Invalid string for {field_name}: {error}"))
@@ -64,7 +60,7 @@ pub fn build_rpc_request(
     rpc_secret: Option<&str>,
 ) -> Result<String, String> {
     if let Some(secret) = rpc_secret {
-        params.insert(0, serde_json::Value::String(format!("token: {secret}")));
+        params.insert(0, serde_json::Value::String(format!("token:{secret}")));
     }
 
     let request = Aria2RpcRequest {
@@ -109,6 +105,7 @@ pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, St
         .map_err(|error| format!("Could not reach aria2 rpc endpoint: {error}"))?
         .error_for_status()
         .map_err(|error| format!("aria2 returned an HTTP error: {error}"))?;
+
     response
         .text()
         .map_err(|error| format!("Could not read aria2 response: {error}"))
@@ -132,11 +129,11 @@ impl Aria2RpcResponse {
             (None, Some(error)) => {
                 Err(format!("aria2 rpc error {}: {}", error.code, error.message))
             }
-            (Some(_), Some(_)) => Err(format!(
-                "Invalid RPC response: both result and error fields populated"
+            (Some(_), Some(_)) => Err(String::from(
+                "Invalid RPC response: both result and error fields populated",
             )),
-            (None, None) => Err(format!(
-                "Invalid RPC response: neither result nor error fields populated"
+            (None, None) => Err(String::from(
+                "Invalid RPC response: neither result nor error fields populated",
             )),
         }
     }
