@@ -1,3 +1,4 @@
+// aria2 download states
 #[derive(Debug, PartialEq)]
 pub enum Status {
     Active,
@@ -9,6 +10,7 @@ pub enum Status {
 }
 
 impl Status {
+    // Returns actual status text to be displayed
     pub fn label(&self) -> &'static str {
         match self {
             Self::Active => "Downloading",
@@ -20,6 +22,7 @@ impl Status {
         }
     }
 
+    // Converts aria2 status strings into our enum
     pub fn from_aria2(value: &str) -> Result<Self, String> {
         match value {
             "active" => Ok(Status::Active),

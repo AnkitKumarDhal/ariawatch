@@ -2,12 +2,14 @@ use crate::domain::{download::Download, status::Status};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+// Error returned by aria2 JSON-RPC server
 #[derive(Debug, Deserialize)]
 pub struct Aria2RpcError {
     pub code: i64,
     pub message: String,
 }
 
+// JSON-RPC request sent to aria2
 #[derive(Debug, Serialize)]
 pub struct Aria2RpcRequest {
     pub jsonrpc: String,
@@ -16,6 +18,7 @@ pub struct Aria2RpcRequest {
     pub params: Vec<serde_json::Value>,
 }
 
+// Outer envelope returned by a JSON-RPC call
 #[derive(Debug, Deserialize)]
 pub struct Aria2RpcResponse {
     pub jsonrpc: String,
@@ -29,6 +32,7 @@ pub struct Aria2FileResponse {
     pub path: String,
 }
 
+// Download data in the format returned by aria2
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Aria2DownloadResponse {
@@ -54,6 +58,7 @@ pub fn parse_download_list(value: serde_json::Value) -> Result<Vec<Aria2Download
     serde_json::from_value(value).map_err(|error| format!("Invalid aria2 download list: {error}"))
 }
 
+// Builds a JSON-RPC request with optional auth
 pub fn build_rpc_request(
     method: &str,
     mut params: Vec<serde_json::Value>,
@@ -78,6 +83,7 @@ pub fn build_get_version_request(rpc_secret: Option<&str>) -> Result<String, Str
     build_rpc_request("aria2.getVersion", Vec::new(), rpc_secret)
 }
 
+// Ask aria2 only for fields used by the current table
 fn download_keys() -> serde_json::Value {
     serde_json::json!([
         "gid",
@@ -125,6 +131,7 @@ pub fn build_tell_stopped_request(
     )
 }
 
+// Sends a JSON-RPC request over HTTP and returns the response body
 pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -145,6 +152,7 @@ pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, St
         .map_err(|error| format!("Could not read aria2 response: {error}"))
 }
 
+// Fetches and parses the list of downloads returned by the RPC request
 pub fn fetch_downloads(
     endpoint: &str,
     request_json: &str,
@@ -156,6 +164,7 @@ pub fn fetch_downloads(
 }
 
 impl Aria2RpcResponse {
+    // Validates the RPC envelope and extracts it result or error
     pub fn into_result(self, expected_id: &str) -> Result<serde_json::Value, String> {
         if self.jsonrpc != "2.0" {
             return Err(format!("Unexpected JSON-RPC version: {}", self.jsonrpc));
@@ -184,6 +193,7 @@ impl Aria2RpcResponse {
 }
 
 impl Aria2DownloadResponse {
+    // Converts aria2 response into AriaWatch's internal model
     pub fn into_download(self) -> Result<Download, String> {
         let name = self
             .files

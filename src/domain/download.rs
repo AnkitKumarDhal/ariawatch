@@ -1,5 +1,6 @@
 use crate::domain::status::Status;
 
+// Normalized information about one download
 #[derive(Debug, PartialEq)]
 pub struct Download {
     pub gid: String,
@@ -29,10 +30,12 @@ impl Download {
         }
     }
 
+    // Calculates remaining bytes, limiting inconsistent values to 0
     pub fn remaining_bytes(&self) -> u64 {
         self.size.saturating_sub(self.downloaded)
     }
 
+    // Calculates percentaed downloaded; returns none if total size is 0
     pub fn percentage_downloaded(&self) -> Option<f64> {
         if self.size == 0 {
             return None;
