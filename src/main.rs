@@ -53,49 +53,50 @@ fn main() {
 
     println!("Connected to aria2 version: {version}");
 
-    let active_request_json = match aria2::build_tell_active_request(rpc_secret.as_deref()) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("Could not fetch tellActive request: {error}");
-            return;
-        }
-    };
-
-    let active_response_json = match aria2::send_rpc_request(&endpoint, &active_request_json) {
-        Ok(body) => body,
+    let active_downloads = match aria2::build_tell_active_request(rpc_secret.as_deref())
+        .and_then(|request| aria2::fetch_downloads(&endpoint, &request))
+    {
+        Ok(downloads) => downloads,
         Err(error) => {
             eprintln!("Could not fetch active downloads: {error}");
             return;
         }
     };
 
-    let active_rpc_json = match aria2::parse_rpc_response(&active_response_json) {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("Could not parse tellActive response: {error}");
-            return;
-        }
-    };
-
-    let active_rpc_result = match active_rpc_json.into_result("ariawatch-1") {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("tellActive failed: {error}");
-            return;
-        }
-    };
-
-    let active_response = match aria2::parse_download_list(active_rpc_result) {
+    let waiting_downloads = match aria2::build_tell_waiting_request(rpc_secret.as_deref(), 0, 1000)
+        .and_then(|request| aria2::fetch_downloads(&endpoint, &request))
+    {
         Ok(downloads) => downloads,
         Err(error) => {
-            eprintln!("Could not decode active downloads: {error}");
+            eprintln!("Could not fetch waiting downloads: {error}");
             return;
         }
     };
+
+    let stopped_downloads = match aria2::build_tell_stopped_request(rpc_secret.as_deref(), 0, 1000)
+        .and_then(|request| aria2::fetch_downloads(&endpoint, &request))
+    {
+        Ok(downloads) => downloads,
+        Err(error) => {
+            eprintln!("Could not fetch stopped downloads: {error}");
+            return;
+        }
+    };
+
+    println!(
+        "Fetched downloads: {} active, {} waiting, {} stopped",
+        active_downloads.len(),
+        waiting_downloads.len(),
+        stopped_downloads.len(),
+    );
+
+    let mut all_downloads = active_downloads;
+    all_downloads.extend(waiting_downloads);
+    all_downloads.extend(stopped_downloads);
 
     let mut state = AppState::new();
 
-    for response in active_response {
+    for response in all_downloads {
         let download = match response.into_download() {
             Ok(download) => download,
             Err(error) => {

@@ -78,17 +78,51 @@ pub fn build_get_version_request(rpc_secret: Option<&str>) -> Result<String, Str
     build_rpc_request("aria2.getVersion", Vec::new(), rpc_secret)
 }
 
-pub fn build_tell_active_request(rpc_secret: Option<&str>) -> Result<String, String> {
-    let keys = serde_json::json!([
+fn download_keys() -> serde_json::Value {
+    serde_json::json!([
         "gid",
         "status",
         "totalLength",
         "completedLength",
         "downloadSpeed",
         "files"
-    ]);
+    ])
+}
 
-    build_rpc_request("aria2.tellActive", vec![keys], rpc_secret)
+pub fn build_tell_active_request(rpc_secret: Option<&str>) -> Result<String, String> {
+    build_rpc_request("aria2.tellActive", vec![download_keys()], rpc_secret)
+}
+
+pub fn build_tell_waiting_request(
+    rpc_secret: Option<&str>,
+    offset: i64,
+    num: i64,
+) -> Result<String, String> {
+    build_rpc_request(
+        "aria2.tellWaiting",
+        vec![
+            serde_json::json!(offset),
+            serde_json::json!(num),
+            download_keys(),
+        ],
+        rpc_secret,
+    )
+}
+
+pub fn build_tell_stopped_request(
+    rpc_secret: Option<&str>,
+    offset: i64,
+    num: i64,
+) -> Result<String, String> {
+    build_rpc_request(
+        "aria2.tellStopped",
+        vec![
+            serde_json::json!(offset),
+            serde_json::json!(num),
+            download_keys(),
+        ],
+        rpc_secret,
+    )
 }
 
 pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, String> {
@@ -109,6 +143,16 @@ pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, St
     response
         .text()
         .map_err(|error| format!("Could not read aria2 response: {error}"))
+}
+
+pub fn fetch_downloads(
+    endpoint: &str,
+    request_json: &str,
+) -> Result<Vec<Aria2DownloadResponse>, String> {
+    let response_json = send_rpc_request(endpoint, request_json)?;
+    let rpc_response = parse_rpc_response(&response_json)?;
+    let result = rpc_response.into_result("ariawatch-1")?;
+    parse_download_list(result)
 }
 
 impl Aria2RpcResponse {
