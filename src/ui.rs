@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, sync::mpsc::Receiver, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -17,10 +17,10 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 
-use crate::app_state::AppState;
+use crate::{app_state::AppState, monitor::MonitorUpdate};
 
 // public function to draw the TUI
-pub fn draw(frame: &mut Frame<'_>, state: &AppState) {
+pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     // 3 sections for the TUI
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -86,15 +86,18 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState) {
     frame.render_widget(table, sections[1]);
 
     // Footer content
-    let footer =
-        Paragraph::new(" Download Overview ").block(Block::default().borders(Borders::ALL));
+    let footer = Paragraph::new(format!(
+        " {status_message} · {} active · q: quit",
+        state.active_download_count()
+    ))
+    .block(Block::default().borders(Borders::ALL));
 
     frame.render_widget(footer, sections[2]);
 }
 
 // Function to ope nthe terminal dashboard nad handle keyboard input
-pub fn run(state: &AppState) -> Result<(), String> {
-    let _ = enable_raw_mode().map_err(|error| format!("Could not enable raw mode: {error}"));
+pub fn run(mut state: AppState, updates: Receiver<MonitorUpdate>) -> Result<(), String> {
+    enable_raw_mode().map_err(|error| format!("Could not enable raw mode: {error}"))?;
 
     let mut stdout = io::stdout();
 
@@ -115,7 +118,7 @@ pub fn run(state: &AppState) -> Result<(), String> {
         }
     };
 
-    let app_result = event_loop(&mut terminal, state);
+    let app_result = event_loop(&mut terminal, &mut state, &updates);
 
     let cursor_result = terminal
         .show_cursor()
@@ -137,23 +140,66 @@ pub fn run(state: &AppState) -> Result<(), String> {
 
 fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    state: &AppState,
+    state: &mut AppState,
+    updates: &Receiver<MonitorUpdate>,
 ) -> Result<(), String> {
+    let mut status_message = "Starting live monitor".to_owned();
+    let mut redraw_needed = true;
     loop {
-        terminal
-            .draw(|frame| draw(frame, state))
-            .map_err(|error| format!("Could not draw dashboard: {error}"))?;
-        let event =
-            event::read().map_err(|error| format!("Could not read keyboard event: {error}"))?;
+        for update in updates.try_iter() {
+            match update {
+                MonitorUpdate::Snapshot(downloads) => match state.replace_downloads(downloads) {
+                    Ok(()) => {
+                        status_message = "Snapshot Synchronized".to_owned();
+                    }
+                    Err(error) => status_message = format!("Snapshot rejected: {error}"),
+                },
 
-        if let Event::Key(key) = event {
-            if key.kind == KeyEventKind::Press
-                && matches!(
-                    key.code,
-                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
-                )
-            {
-                return Ok(());
+                MonitorUpdate::Progress(downloads) => {
+                    for download in downloads {
+                        state.upsert_download(download);
+                    }
+                }
+
+                MonitorUpdate::Status(message) => {
+                    status_message = message;
+                }
+            }
+
+            redraw_needed = true;
+        }
+
+        if redraw_needed {
+            terminal
+                .draw(|frame| draw(frame, state, &status_message))
+                .map_err(|error| format!("Could not draw dashboard: {error}"))?;
+
+            redraw_needed = false;
+        }
+
+        if event::poll(Duration::from_millis(100))
+            .map_err(|error| format!("Could not poll terminal events: {error}"))?
+        {
+            let event =
+                event::read().map_err(|error| format!("Could not read terminal event: {error}"))?;
+
+            match event {
+                Event::Key(key) => {
+                    if key.kind == KeyEventKind::Press
+                        && matches!(
+                            key.code,
+                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                        )
+                    {
+                        return Ok(());
+                    }
+                }
+
+                Event::Resize(_, _) => {
+                    redraw_needed = true;
+                }
+
+                _ => {}
             }
         }
     }

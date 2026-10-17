@@ -1,4 +1,4 @@
-use crate::{app_state::AppState, aria2, ui};
+use crate::{app_state::AppState, aria2, monitor, ui};
 
 // Runs the main application workflow
 pub fn run() -> Result<(), String> {
@@ -58,7 +58,8 @@ pub fn run() -> Result<(), String> {
     println!("Tracked downloads: {}", state.download_count());
 
     // Running the actual TUI
-    ui::run(&state)?;
+    let updates = monitor::start(endpoint.clone(), rpc_secret.clone(), state.active_gids())?;
+    ui::run(state, updates)?;
 
     Ok(())
 }
