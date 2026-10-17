@@ -2,6 +2,7 @@ mod app;
 mod app_state;
 mod aria2;
 mod domain;
+mod ui;
 
 use crate::app::run;
 

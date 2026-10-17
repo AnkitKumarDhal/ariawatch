@@ -1,4 +1,4 @@
-use crate::{app_state::AppState, aria2};
+use crate::{app_state::AppState, aria2, ui};
 
 // Runs the main application workflow
 pub fn run() -> Result<(), String> {
@@ -58,7 +58,7 @@ pub fn run() -> Result<(), String> {
     println!("Tracked downloads: {}", state.download_count());
 
     // Printing the download table
-    print_download_table(&state);
+    ui::run(&state)?;
 
     Ok(())
 }
@@ -94,28 +94,4 @@ fn fetch_all_downloads(
     all_downloads.extend(stopped_downloads);
 
     Ok((active_count, waiting_count, stopped_count, all_downloads))
-}
-
-fn print_download_table(state: &AppState) {
-    println!(
-        "\n{:<32} {:<14} {:>10} {:>14} {:>14}",
-        "Name", "Status", "Progress", "Speed (B/s)", "Remaining"
-    );
-    println!("{}", "-".repeat(88));
-
-    for download in state.downloads() {
-        let progress = match download.percentage_downloaded() {
-            Some(percent) => format!("{percent:.1}%"),
-            None => String::from("N/A"),
-        };
-
-        println!(
-            "{:<32} {:<14} {:>10} {:>14} {:>10.2} GiB",
-            download.name,
-            download.status.label(),
-            progress,
-            download.speed,
-            download.remaining_bytes() as f64 / 1024.0 / 1024.0 / 1024.0
-        );
-    }
 }
