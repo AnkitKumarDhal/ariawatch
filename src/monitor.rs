@@ -5,6 +5,8 @@ use std::{
     time::Duration,
 };
 
+use tungstenite::{Message, stream::MaybeTlsStream};
+
 use crate::{aria2, domain::download::Download};
 
 // Messages delivered from snapshopt to UI
@@ -12,6 +14,7 @@ pub enum MonitorUpdate {
     Snapshot(Vec<Download>),
     Progress(Vec<Download>),
     Status(String),
+    Heartbeat,
 }
 
 // Downlods the full list and converts it into our internal model
@@ -47,6 +50,13 @@ pub fn start(
     initial_active_gids: Vec<String>,
 ) -> Result<Receiver<MonitorUpdate>, String> {
     let (sender, receiver) = mpsc::channel();
+    let websocket_sender = sender.clone();
+    let websocket_endpoint = endpoint.clone();
+
+    thread::Builder::new()
+        .name("ariawatch-websocket".to_owned())
+        .spawn(move || websocket_loop(websocket_endpoint, websocket_sender))
+        .map_err(|error| format!("Could not start websocket listener: {error}"))?;
 
     thread::Builder::new()
         .name("ariawatch-monitor".to_owned())
@@ -61,6 +71,158 @@ pub fn start(
         .map_err(|error| format!("Could not start monitoring working: {error}"))?;
 
     Ok(receiver)
+}
+
+fn websocket_url(endpoint: &str) -> Result<String, String> {
+    if let Some(address) = endpoint.strip_prefix("http://") {
+        Ok(format!("ws://{address}"))
+    } else if let Some(address) = endpoint.strip_prefix("https://") {
+        Ok(format!("wss://{address}"))
+    } else {
+        Err(format!(
+            "Cannot derive websocket url from RPC endpoint: {endpoint}"
+        ))
+    }
+}
+
+fn websocket_loop(endpoint: String, updates: Sender<MonitorUpdate>) {
+    let endpoint = match websocket_url(&endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            let _ = updates.send(MonitorUpdate::Status(error));
+            return;
+        }
+    };
+
+    loop {
+        if updates
+            .send(MonitorUpdate::Status(
+                "Connecting to aria2 WebSocket".to_owned(),
+            ))
+            .is_err()
+        {
+            return;
+        }
+
+        match tungstenite::connect(&endpoint) {
+            Ok((mut socket, _response)) => {
+                if updates
+                    .send(MonitorUpdate::Status("WebSocket connected".to_owned()))
+                    .is_err()
+                {
+                    return;
+                }
+
+                let timeout_result = match socket.get_mut() {
+                    MaybeTlsStream::Plain(stream) => {
+                        stream.set_read_timeout(Some(Duration::from_secs(1)))
+                    }
+
+                    MaybeTlsStream::Rustls(stream) => {
+                        stream.sock.set_read_timeout(Some(Duration::from_secs(1)))
+                    }
+
+                    _ => Ok(()),
+                };
+
+                if let Err(error) = timeout_result {
+                    if updates
+                        .send(MonitorUpdate::Status(format!(
+                            "Could not configure websocket timeout: {error}",
+                        )))
+                        .is_err()
+                    {
+                        return;
+                    }
+
+                    thread::sleep(Duration::from_secs(2));
+                    continue;
+                }
+
+                loop {
+                    match socket.read() {
+                        Ok(message) => {
+                            if updates.send(MonitorUpdate::Heartbeat).is_err() {
+                                return;
+                            }
+
+                            match message {
+                                Message::Text(payload) => {
+                                    let Ok(value) =
+                                        serde_json::from_str::<serde_json::Value>(payload.as_str())
+                                    else {
+                                        continue;
+                                    };
+
+                                    let Some(method) = value.get("method").and_then(|v| v.as_str())
+                                    else {
+                                        continue;
+                                    };
+
+                                    if !method.starts_with("aria2.onDownload") {
+                                        continue;
+                                    }
+
+                                    let gid = value
+                                        .pointer("/params/0/gid")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown GID");
+
+                                    if updates
+                                        .send(MonitorUpdate::Status(format!("{method} · {gid}")))
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                }
+
+                                Message::Close(_) => break,
+
+                                _ => {}
+                            }
+                        }
+
+                        Err(tungstenite::Error::Io(error))
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                            ) =>
+                        {
+                            if updates.send(MonitorUpdate::Heartbeat).is_err() {
+                                return;
+                            }
+                        }
+
+                        Err(error) => {
+                            if updates
+                                .send(MonitorUpdate::Status(format!(
+                                    "WebSocket disconnected: {error}"
+                                )))
+                                .is_err()
+                            {
+                                return;
+                            }
+
+                            break;
+                        }
+                    }
+                }
+            }
+
+            Err(error) => {
+                if updates
+                    .send(MonitorUpdate::Status(format!(
+                        "WebSocket connection failed: {error}"
+                    )))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+
+        thread::sleep(Duration::from_secs(2));
+    }
 }
 
 fn refresh_snapshot(

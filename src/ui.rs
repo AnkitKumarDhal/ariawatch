@@ -164,6 +164,8 @@ fn event_loop(
                 MonitorUpdate::Status(message) => {
                     status_message = message;
                 }
+
+                MonitorUpdate::Heartbeat => continue,
             }
 
             redraw_needed = true;
