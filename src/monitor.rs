@@ -126,9 +126,12 @@ fn monitor_loop(
         if current_gids != active_gids {
             if !refresh_snapshot(&endpoint, rpc_secret.as_deref(), &updates, &mut active_gids) {
                 return;
-            } else if !updates.send(MonitorUpdate::Progress(downloads)).is_err() {
-                return;
             }
+            continue;
+        }
+
+        if updates.send(MonitorUpdate::Progress(downloads)).is_err() {
+            return;
         }
     }
 }
