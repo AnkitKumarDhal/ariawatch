@@ -141,6 +141,10 @@ fn websocket_loop(endpoint: String, updates: Sender<MonitorUpdate>, notification
                     continue;
                 }
 
+                if notifications.send(()).is_err() {
+                    return;
+                }
+
                 loop {
                     match socket.read() {
                         Ok(message) => {
