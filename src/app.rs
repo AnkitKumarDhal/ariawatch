@@ -69,17 +69,17 @@ fn fetch_all_downloads(
     rpc_secret: Option<&str>,
 ) -> Result<(usize, usize, usize, Vec<aria2::Aria2DownloadResponse>), String> {
     // Fetch and build active download list
-    let active_request = aria2::build_tell_active_request(rpc_secret.as_deref())
+    let active_request = aria2::build_tell_active_request(rpc_secret)
         .map_err(|error| format!("Could not build active-download request: {error}"))?;
     let active_downloads = aria2::fetch_downloads(endpoint, &active_request)?;
 
     // Fetch and build waiting download list
-    let waiting_request = aria2::build_tell_waiting_request(rpc_secret.as_deref(), 0, 1000)
+    let waiting_request = aria2::build_tell_waiting_request(rpc_secret, 0, 1000)
         .map_err(|error| format!("Could not build waiting-download request: {error}"))?;
     let waiting_downloads = aria2::fetch_downloads(endpoint, &waiting_request)?;
 
     // Fetch and build stopped download list
-    let stopped_request = aria2::build_tell_stopped_request(rpc_secret.as_deref(), 0, 1000)
+    let stopped_request = aria2::build_tell_stopped_request(rpc_secret, 0, 1000)
         .map_err(|error| format!("Could not build stopped-download request: {error}"))?;
     let stopped_downloads = aria2::fetch_downloads(endpoint, &stopped_request)?;
 
