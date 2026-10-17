@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
     thread,
     time::Duration,
 };
@@ -49,13 +49,14 @@ pub fn start(
     rpc_secret: Option<String>,
     initial_active_gids: Vec<String>,
 ) -> Result<Receiver<MonitorUpdate>, String> {
-    let (sender, receiver) = mpsc::channel();
-    let websocket_sender = sender.clone();
+    let (updates_tx, updates_rx) = mpsc::channel();
+    let (notifications_tx, notifications_rx) = mpsc::channel();
+    let websocket_sender = updates_tx.clone();
     let websocket_endpoint = endpoint.clone();
 
     thread::Builder::new()
         .name("ariawatch-websocket".to_owned())
-        .spawn(move || websocket_loop(websocket_endpoint, websocket_sender))
+        .spawn(move || websocket_loop(websocket_endpoint, websocket_sender, notifications_tx))
         .map_err(|error| format!("Could not start websocket listener: {error}"))?;
 
     thread::Builder::new()
@@ -65,12 +66,13 @@ pub fn start(
                 endpoint,
                 rpc_secret,
                 initial_active_gids.into_iter().collect(),
-                sender,
+                updates_tx,
+                notifications_rx,
             );
         })
         .map_err(|error| format!("Could not start monitoring working: {error}"))?;
 
-    Ok(receiver)
+    Ok(updates_rx)
 }
 
 fn websocket_url(endpoint: &str) -> Result<String, String> {
@@ -85,7 +87,7 @@ fn websocket_url(endpoint: &str) -> Result<String, String> {
     }
 }
 
-fn websocket_loop(endpoint: String, updates: Sender<MonitorUpdate>) {
+fn websocket_loop(endpoint: String, updates: Sender<MonitorUpdate>, notifications: Sender<()>) {
     let endpoint = match websocket_url(&endpoint) {
         Ok(endpoint) => endpoint,
         Err(error) => {
@@ -174,6 +176,10 @@ fn websocket_loop(endpoint: String, updates: Sender<MonitorUpdate>) {
                                     {
                                         return;
                                     }
+
+                                    if notifications.send(()).is_err() {
+                                        return;
+                                    }
                                 }
 
                                 Message::Close(_) => break,
@@ -249,15 +255,31 @@ fn monitor_loop(
     rpc_secret: Option<String>,
     mut active_gids: HashSet<String>,
     updates: Sender<MonitorUpdate>,
+    notifications: Receiver<()>,
 ) {
     loop {
         let idle = active_gids.is_empty();
 
-        thread::sleep(if idle {
+        let poll_interval = if active_gids.is_empty() {
             Duration::from_secs(5)
         } else {
             Duration::from_secs(1)
-        });
+        };
+
+        match notifications.recv_timeout(poll_interval) {
+            Ok(()) => {
+                if !refresh_snapshot(&endpoint, rpc_secret.as_deref(), &updates, &mut active_gids) {
+                    return;
+                }
+                continue;
+            }
+
+            Err(RecvTimeoutError::Timeout) => {}
+
+            Err(RecvTimeoutError::Disconnected) => {
+                thread::sleep(poll_interval);
+            }
+        }
 
         if idle {
             if !refresh_snapshot(&endpoint, rpc_secret.as_deref(), &updates, &mut active_gids) {
