@@ -57,7 +57,7 @@ pub fn run() -> Result<(), String> {
 
     println!("Tracked downloads: {}", state.download_count());
 
-    // Printing the download table
+    // Running the actual TUI
     ui::run(&state)?;
 
     Ok(())

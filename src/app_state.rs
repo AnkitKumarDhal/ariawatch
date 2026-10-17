@@ -30,6 +30,32 @@ impl AppState {
         Ok(())
     }
 
+    // Updates existing download or tracks a new one
+    pub fn upsert_download(&mut self, download: Download) {
+        if let Some(existing) = self
+            .downloads
+            .iter_mut()
+            .find(|existing| existing.gid == download.gid)
+        {
+            *existing = download;
+        } else {
+            self.downloads.push(download);
+        }
+    }
+
+    // Replace the tracked list with a fresh validated snapshot
+    pub fn replace_downloads(&mut self, downloads: Vec<Download>) -> Result<(), String> {
+        let mut replacement = Self::new();
+
+        for download in downloads {
+            replacement.add_download(download)?;
+        }
+
+        self.downloads = replacement.downloads;
+
+        Ok(())
+    }
+
     // Returns the number of tracked downloads
     pub fn download_count(&self) -> usize {
         self.downloads.len()
