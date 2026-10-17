@@ -61,6 +61,23 @@ impl AppState {
         self.downloads.len()
     }
 
+    // Returns active download counts
+    pub fn active_download_count(&self) -> usize {
+        self.downloads
+            .iter()
+            .filter(|download| download.status.is_active())
+            .count()
+    }
+
+    // Returns GIDs of active downloads
+    pub fn active_gids(&self) -> Vec<String> {
+        self.downloads
+            .iter()
+            .filter(|download| download.status.is_active())
+            .map(|download| download.gid.clone())
+            .collect()
+    }
+
     // Provides read-only access to the tracked downloads
     pub fn downloads(&self) -> &[Download] {
         &self.downloads

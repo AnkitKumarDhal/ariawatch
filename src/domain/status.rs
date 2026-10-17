@@ -22,6 +22,11 @@ impl Status {
         }
     }
 
+    // Identifies active downloads (so updates can be fetched for them)
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+
     // Converts aria2 status strings into our enum
     pub fn from_aria2(value: &str) -> Result<Self, String> {
         match value {

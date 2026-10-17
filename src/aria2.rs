@@ -163,6 +163,31 @@ pub fn fetch_downloads(
     parse_download_list(result)
 }
 
+// Fetches all downloads for a full snapshot
+pub fn fetch_all_downloads(
+    endpoint: &str,
+    rpc_secret: Option<&str>,
+) -> Result<(usize, usize, usize, Vec<Aria2DownloadResponse>), String> {
+    let active_request = build_tell_active_request(rpc_secret)?;
+    let active_downloads = fetch_downloads(endpoint, &active_request)?;
+
+    let waiting_request = build_tell_waiting_request(rpc_secret, 0, 1000)?;
+    let waiting_downloads = fetch_downloads(endpoint, &waiting_request)?;
+
+    let stopped_request = build_tell_stopped_request(rpc_secret, 0, 1000)?;
+    let stopped_downloads = fetch_downloads(endpoint, &stopped_request)?;
+
+    let active_count = active_downloads.len();
+    let waiting_count = waiting_downloads.len();
+    let stopped_count = stopped_downloads.len();
+
+    let mut all_downloads = active_downloads;
+    all_downloads.extend(waiting_downloads);
+    all_downloads.extend(stopped_downloads);
+
+    Ok((active_count, waiting_count, stopped_count, all_downloads))
+}
+
 impl Aria2RpcResponse {
     // Validates the RPC envelope and extracts it result or error
     pub fn into_result(self, expected_id: &str) -> Result<serde_json::Value, String> {
