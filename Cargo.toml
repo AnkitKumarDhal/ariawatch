@@ -2,6 +2,10 @@
 name = "ariawatch"
 version = "0.0.1"
 edition = "2024"
+description = "A TUI for monitoring aria2 downloads"
+license = "MIT"
+repository = "https://github.com/AnkitKumarDhal/ariaWatch.git"
+readme = "README.md"
 
 [dependencies]
 crossterm = "0.29.0"
