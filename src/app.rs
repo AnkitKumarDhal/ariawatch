@@ -1,28 +1,21 @@
+// Actual starter and init of the application
 use crate::{app_state::AppState, aria2, monitor, ui};
 
-// Runs the main application workflow
+// Connectst o aria2 and starts the monitor and TUI
 pub fn run() -> Result<(), String> {
     println!("ariawatch");
 
-    // Read configs from ENv vars
     let endpoint = std::env::var("ARIA2_RPC_URL")
         .unwrap_or_else(|_| String::from("http://127.0.0.1:6800/jsonrpc"));
-
     let rpc_secret = std::env::var("ARIA2_RPC_SECRET").ok();
 
-    // Build request used to check aria2 conneciton
     let request_json = aria2::build_get_version_request(rpc_secret.as_deref())
         .map_err(|error| format!("Could not build RPC request: {error}"))?;
     println!("Calling aria2.getVersion at {endpoint}");
 
-    // Send request and parse aria2's JSON-RPC response
     let response_json = aria2::send_rpc_request(&endpoint, &request_json)?;
     let rpc_response = aria2::parse_rpc_response(&response_json)?;
-
-    // Validate the reponse and extract its result
     let rpc_result = rpc_response.into_result("ariawatch-1")?;
-
-    // Determine version
     let version = rpc_result
         .get("version")
         .and_then(|value| value.as_str())
@@ -30,15 +23,12 @@ pub fn run() -> Result<(), String> {
 
     println!("Connected to aria2 version: {version}");
 
-    // Fetching and using all downloads list
     let (active_count, waiting_count, stopped_count, all_downloads) =
         aria2::fetch_all_downloads(&endpoint, rpc_secret.as_deref())?;
-
     println!(
         "Fetched downloads: {active_count} active, {waiting_count} waiting, {stopped_count} stopped"
     );
 
-    // Create and use state to track downloads
     let mut state = AppState::new();
 
     for response in all_downloads {
@@ -57,7 +47,6 @@ pub fn run() -> Result<(), String> {
 
     println!("Tracked downloads: {}", state.download_count());
 
-    // Running the actual TUI
     let updates = monitor::start(endpoint.clone(), rpc_secret.clone(), state.active_gids())?;
     ui::run(state, updates)?;
 

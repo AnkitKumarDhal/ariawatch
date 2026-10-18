@@ -1,7 +1,9 @@
+// Handles aria2 websocket notifications and recongition
 use super::MonitorUpdate;
 use std::{net::TcpStream, sync::mpsc::Sender, thread, time::Duration};
 use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
 
+// Describes how to handle a websocket MESSAGE
 #[derive(Debug, PartialEq, Eq)]
 enum WebSocketMessageAction {
     Continue,
@@ -9,12 +11,14 @@ enum WebSocketMessageAction {
     Shutdown,
 }
 
+// Describes how to handle a websocket SESSIONS's END
 #[derive(Debug, PartialEq, Eq)]
 enum WebSocketSessionAction {
     Reconnect,
     Shutdown,
 }
 
+// this takes the http endpoint and turns it into websocket url
 fn websocket_url(endpoint: &str) -> Result<String, String> {
     if let Some(address) = endpoint.strip_prefix("http://") {
         Ok(format!("ws://{address}"))
@@ -136,6 +140,7 @@ fn run_websocket_session(
     }
 }
 
+// THis shit maintains the websocket connection (this f**ker was a pain to work with <~3)
 pub(super) fn websocket_loop(
     endpoint: String,
     updates: Sender<MonitorUpdate>,

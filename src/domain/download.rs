@@ -1,3 +1,4 @@
+// Defines download data and progress calculations
 use crate::domain::status::Status;
 
 // Normalized information about one download
@@ -30,12 +31,10 @@ impl Download {
         }
     }
 
-    // Calculates remaining bytes, limiting inconsistent values to 0
     pub fn remaining_bytes(&self) -> u64 {
         self.size.saturating_sub(self.downloaded)
     }
 
-    // Calculates percentaed downloaded; returns none if total size is 0
     pub fn percentage_downloaded(&self) -> Option<f64> {
         if self.size == 0 {
             return None;
@@ -45,6 +44,7 @@ impl Download {
     }
 }
 
+// These f**king tests <~3
 #[cfg(test)]
 mod tests {
     use crate::domain::download::Download;

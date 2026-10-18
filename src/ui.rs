@@ -1,5 +1,5 @@
-use std::{io, sync::mpsc::Receiver, time::Duration};
-
+// Renders the actual UI and terminal input
+use crate::{app_state::AppState, monitor::MonitorUpdate};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -16,8 +16,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
-
-use crate::{app_state::AppState, monitor::MonitorUpdate};
+use std::{io, sync::mpsc::Receiver, time::Duration};
 
 // public function to draw the TUI
 pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
@@ -138,6 +137,7 @@ pub fn run(mut state: AppState, updates: Receiver<MonitorUpdate>) -> Result<(), 
     Ok(())
 }
 
+// Handles keyboard input
 fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut AppState,

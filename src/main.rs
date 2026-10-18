@@ -1,3 +1,4 @@
+// Main file, entrypoint of the whole application
 mod app;
 mod app_state;
 mod aria2;
@@ -7,6 +8,7 @@ mod ui;
 
 use crate::app::run;
 
+// Runs the application entry point
 fn main() {
     if let Err(error) = run() {
         eprintln!("ariawatch: {error}");

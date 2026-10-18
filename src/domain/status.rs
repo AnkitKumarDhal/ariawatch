@@ -1,3 +1,5 @@
+// This file, defines aria2 download statusses
+
 // aria2 download states
 #[derive(Debug, PartialEq)]
 pub enum Status {

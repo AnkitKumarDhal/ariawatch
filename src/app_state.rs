@@ -1,3 +1,4 @@
+// Manages download state for the application
 use crate::domain::download::Download;
 
 // In-memory collection of downloads, tracked by AriaWatch
@@ -6,7 +7,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    // Creates an empty application state
     pub fn new() -> Self {
         Self {
             downloads: Vec::new(),
@@ -23,7 +23,6 @@ impl AppState {
         Ok(())
     }
 
-    // Adds a download, rejecting duplicate GIDs
     pub fn add_download(&mut self, download: Download) -> Result<(), String> {
         self.ensure_unique_gid(&download.gid)?;
         self.downloads.push(download);
@@ -56,12 +55,10 @@ impl AppState {
         Ok(())
     }
 
-    // Returns the number of tracked downloads
     pub fn download_count(&self) -> usize {
         self.downloads.len()
     }
 
-    // Returns active download counts
     pub fn active_download_count(&self) -> usize {
         self.downloads
             .iter()
@@ -69,7 +66,6 @@ impl AppState {
             .count()
     }
 
-    // Returns GIDs of active downloads
     pub fn active_gids(&self) -> Vec<String> {
         self.downloads
             .iter()

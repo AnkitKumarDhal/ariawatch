@@ -1,7 +1,7 @@
+// This file has fucntions to fetch download data from aria2
 use crate::{aria2, domain::download::Download};
 use std::collections::HashSet;
 
-// Downlods the full list and converts it into our internal model
 pub(super) fn fetch_snapshot(
     endpoint: &str,
     rpc_secret: Option<&str>,

@@ -1,15 +1,16 @@
+// Handles aria2 JSON-RPC requests and responses
 use crate::domain::{download::Download, status::Status};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-// Error returned by aria2 JSON-RPC server
+// Represents an aria2 JSON-RPC error
 #[derive(Debug, Deserialize)]
 pub struct Aria2RpcError {
     pub code: i64,
     pub message: String,
 }
 
-// JSON-RPC request sent to aria2
+// Represents an outgoing JSON-RPC request
 #[derive(Debug, Serialize)]
 pub struct Aria2RpcRequest {
     pub jsonrpc: String,
@@ -18,7 +19,7 @@ pub struct Aria2RpcRequest {
     pub params: Vec<serde_json::Value>,
 }
 
-// Outer envelope returned by a JSON-RPC call
+// Reprsents a JSON-RPC response envelope
 #[derive(Debug, Deserialize)]
 pub struct Aria2RpcResponse {
     pub jsonrpc: String,
@@ -27,12 +28,13 @@ pub struct Aria2RpcResponse {
     pub error: Option<Aria2RpcError>,
 }
 
+// Represents a file entry in an aria2 response
 #[derive(Debug, Deserialize)]
 pub struct Aria2FileResponse {
     pub path: String,
 }
 
-// Download data in the format returned by aria2
+// Represents download data returned by aria2
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Aria2DownloadResponse {
@@ -58,7 +60,6 @@ pub fn parse_download_list(value: serde_json::Value) -> Result<Vec<Aria2Download
     serde_json::from_value(value).map_err(|error| format!("Invalid aria2 download list: {error}"))
 }
 
-// Builds a JSON-RPC request with optional auth
 pub fn build_rpc_request(
     method: &str,
     mut params: Vec<serde_json::Value>,
@@ -131,7 +132,6 @@ pub fn build_tell_stopped_request(
     )
 }
 
-// Sends a JSON-RPC request over HTTP and returns the response body
 pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))

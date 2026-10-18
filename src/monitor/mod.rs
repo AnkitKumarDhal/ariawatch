@@ -1,3 +1,4 @@
+// Orchestrates polling and wbesocket monitoring
 mod rpc;
 mod websocket;
 use self::rpc::{active_gid_set, fetch_active, fetch_snapshot};
@@ -9,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-// Messages delivered from snapshopt to UI
+// Updates sent from background monitor to TUI
 pub enum MonitorUpdate {
     Snapshot(Vec<Download>),
     Progress(Vec<Download>),
@@ -17,6 +18,7 @@ pub enum MonitorUpdate {
     Heartbeat,
 }
 
+// Starts the monitor and websocket threads (my first time working with threads)
 pub fn start(
     endpoint: String,
     rpc_secret: Option<String>,
@@ -50,6 +52,7 @@ pub fn start(
     Ok(updates_rx)
 }
 
+// Refreshse the full snapshot
 fn refresh_snapshot(
     endpoint: &str,
     rpc_secret: Option<&str>,
@@ -69,6 +72,7 @@ fn refresh_snapshot(
     }
 }
 
+// Polls aria2 and forwards downlaod updates
 fn monitor_loop(
     endpoint: String,
     rpc_secret: Option<String>,
