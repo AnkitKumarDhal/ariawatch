@@ -68,6 +68,7 @@ AriaWatch writes diagnostic messages to:
 - `~/.local/state/ariawatch/ariawatch.log` otherwise.
 
 The log contains timestamped application messages and diagnostic errors. Check it when the dashboard reports that an operation failed.
+The active log is rotated when it reaches approximately 1 MiB. The previous log is retained as `ariawatch.log.1`; older backups are overwritten during subsequent rotations.
 
 ## Current limitations
 
