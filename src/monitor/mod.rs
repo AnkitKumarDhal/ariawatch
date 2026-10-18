@@ -2,7 +2,7 @@
 mod rpc;
 mod websocket;
 use self::rpc::{active_gid_set, fetch_active, fetch_snapshot};
-use crate::domain::download::Download;
+use crate::{domain::download::Download, logging};
 use std::{
     collections::HashSet,
     sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
@@ -64,11 +64,15 @@ fn refresh_snapshot(
             *active_gids = active_gid_set(&downloads);
             updates.send(MonitorUpdate::Snapshot(downloads)).is_ok()
         }
-        Err(error) => updates
-            .send(MonitorUpdate::Status(format!(
-                "Snapshot refresh failed: {error}"
-            )))
-            .is_ok(),
+        Err(error) => {
+            logging::error(&format!("Snapshot refresh failed: {error}"));
+
+            updates
+                .send(MonitorUpdate::Status(
+                    "Snapshot refresh failed; see logs".to_owned(),
+                ))
+                .is_ok()
+        }
     }
 }
 
@@ -115,10 +119,11 @@ fn monitor_loop(
         let downloads = match fetch_active(&endpoint, rpc_secret.as_deref()) {
             Ok(downloads) => downloads,
             Err(error) => {
+                logging::error(&format!("Progress refresh failed: {error}"));
                 if updates
-                    .send(MonitorUpdate::Status(format!(
-                        "Progress refresh failed: {error}"
-                    )))
+                    .send(MonitorUpdate::Status(
+                        "Progress refresh failed; see logs".to_owned(),
+                    ))
                     .is_err()
                 {
                     return;
