@@ -1,8 +1,17 @@
 // Actual starter and init of the application
-use crate::{app_state::AppState, aria2, monitor, ui};
+use crate::{app_state::AppState, aria2, logging, monitor, ui};
 
 // Connectst o aria2 and starts the monitor and TUI
 pub fn run() -> Result<(), String> {
+    match logging::init() {
+        Ok(path) => {
+            logging::info(&format!("Ariawatch starting; log file: {}", path.display()));
+        }
+        Err(error) => {
+            eprintln!("ariawatch: file logging unavailable: {error}");
+        }
+    }
+
     println!("ariawatch");
 
     let endpoint = std::env::var("ARIA2_RPC_URL")
@@ -22,12 +31,16 @@ pub fn run() -> Result<(), String> {
         .unwrap_or("unknown");
 
     println!("Connected to aria2 version: {version}");
+    logging::info(&format!("Connected to aria2 version: {version}"));
 
     let (active_count, waiting_count, stopped_count, all_downloads) =
         aria2::fetch_all_downloads(&endpoint, rpc_secret.as_deref())?;
     println!(
         "Fetched downloads: {active_count} active, {waiting_count} waiting, {stopped_count} stopped"
     );
+    logging::info(&format!(
+        "Initial snapshots: {active_count} active, {waiting_count} waiting, {stopped_count} stopped"
+    ));
 
     let mut state = AppState::new();
 
@@ -36,6 +49,7 @@ pub fn run() -> Result<(), String> {
             Ok(download) => download,
             Err(error) => {
                 eprintln!("Skipping invalid download: {error}");
+                logging::warn(&format!("Skipping invalid download: {error}"));
                 continue;
             }
         };

@@ -3,6 +3,7 @@ mod app;
 mod app_state;
 mod aria2;
 mod domain;
+mod logging;
 mod monitor;
 mod ui;
 
