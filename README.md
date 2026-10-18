@@ -80,3 +80,6 @@ The log contains timestamped application messages and diagnostic errors. Check i
 - [aria2 documentation](https://aria2.github.io/manual/en/html/aria2c.html)
 - [aria2 JSON-RPC documentation](https://github.com/aria2/aria2/blob/master/doc/manual-src/en/aria2c.rst)
 
+## License
+
+AriaWatch is licensed under the MIT License. See [LICENSE](LICENSE) for details.
