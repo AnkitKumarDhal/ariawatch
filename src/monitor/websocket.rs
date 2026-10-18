@@ -188,3 +188,73 @@ pub(super) fn websocket_loop(
         thread::sleep(Duration::from_secs(2));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_lifecycle_notification, websocket_url};
+
+    #[test]
+    fn converts_http_to_ws() {
+        assert_eq!(
+            websocket_url("http://127.0.0.1:6800/jsonrpc").unwrap(),
+            "ws://127.0.0.1:6800/jsonrpc"
+        );
+    }
+
+    #[test]
+    fn converts_https_to_wss() {
+        assert_eq!(
+            websocket_url("https://example.com/jsonrpc").unwrap(),
+            "wss://example.com/jsonrpc"
+        );
+    }
+
+    #[test]
+    fn preserves_the_rpc_path() {
+        assert_eq!(
+            websocket_url("http://localhost:6800/custom/rpc").unwrap(),
+            "ws://localhost:6800/custom/rpc"
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_schemes() {
+        assert!(websocket_url("ftp://localhost:6800/jsonrpc").is_err());
+    }
+
+    #[test]
+    fn parses_lifecycle_notification() {
+        let payload = r#"{
+            "jsonrpc": "2.0",
+            "method": "aria2.onDownloadPause",
+            "params": [{"gid": "abc123"}]
+        }"#;
+
+        assert_eq!(
+            parse_lifecycle_notification(payload),
+            Some(("aria2.onDownloadPause".to_owned(), "abc123".to_owned()))
+        );
+    }
+
+    #[test]
+    fn ignores_unrelated_methods() {
+        let payload = r#"{"method":"aria2.getVersion","params":[]}"#;
+
+        assert_eq!(parse_lifecycle_notification(payload), None);
+    }
+
+    #[test]
+    fn ignores_malformed_json() {
+        assert_eq!(parse_lifecycle_notification("{invalid"), None);
+    }
+
+    #[test]
+    fn handles_missing_gid() {
+        let payload = r#"{"method":"aria2.onDownloadPause","params":[{}]}"#;
+
+        assert_eq!(
+            parse_lifecycle_notification(payload),
+            Some(("aria2.onDownloadPause".to_owned(), "unknown GID".to_owned()))
+        );
+    }
+}
