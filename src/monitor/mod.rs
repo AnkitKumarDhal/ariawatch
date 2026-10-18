@@ -1,5 +1,7 @@
+mod rpc;
 mod websocket;
-use crate::{aria2, domain::download::Download};
+use self::rpc::{active_gid_set, fetch_active, fetch_snapshot};
+use crate::domain::download::Download;
 use std::{
     collections::HashSet,
     sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
@@ -13,33 +15,6 @@ pub enum MonitorUpdate {
     Progress(Vec<Download>),
     Status(String),
     Heartbeat,
-}
-
-// Downlods the full list and converts it into our internal model
-fn fetch_snapshot(endpoint: &str, rpc_secret: Option<&str>) -> Result<Vec<Download>, String> {
-    let (_, _, _, responses) = aria2::fetch_all_downloads(endpoint, rpc_secret)?;
-
-    responses
-        .into_iter()
-        .map(|response| response.into_download())
-        .collect()
-}
-
-fn fetch_active(endpoint: &str, rpc_secret: Option<&str>) -> Result<Vec<Download>, String> {
-    let request = aria2::build_tell_active_request(rpc_secret)?;
-
-    aria2::fetch_downloads(endpoint, &request)?
-        .into_iter()
-        .map(|response| response.into_download())
-        .collect()
-}
-
-fn active_gid_set(downloads: &[Download]) -> HashSet<String> {
-    downloads
-        .iter()
-        .filter(|download| download.status.is_active())
-        .map(|download| download.gid.clone())
-        .collect()
 }
 
 pub fn start(

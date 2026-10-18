@@ -80,7 +80,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Downloads ({})", state.download_count())),
+            .title(format!(" Downloads ({}) ", state.download_count())),
     );
 
     frame.render_widget(table, sections[1]);
