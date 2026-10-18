@@ -103,6 +103,48 @@ fn parse_lifecycle_notification(payload: &str) -> Option<(String, String)> {
     Some((method.to_owned(), gid.to_owned()))
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum WebSocketMessageAction {
+    Continue,
+    Reconnect,
+    Shutdown,
+}
+
+fn handle_websocket_message(
+    message: Message,
+    updates: &Sender<MonitorUpdate>,
+    notifications: &Sender<()>,
+) -> WebSocketMessageAction {
+    if updates.send(MonitorUpdate::Heartbeat).is_err() {
+        return WebSocketMessageAction::Shutdown;
+    }
+
+    match message {
+        Message::Text(payload) => {
+            let Some((method, gid)) = parse_lifecycle_notification(payload.as_str()) else {
+                return WebSocketMessageAction::Continue;
+            };
+
+            if updates
+                .send(MonitorUpdate::Status(format!("{method} · {gid}")))
+                .is_err()
+            {
+                return WebSocketMessageAction::Shutdown;
+            }
+
+            if notifications.send(()).is_err() {
+                return WebSocketMessageAction::Shutdown;
+            }
+
+            WebSocketMessageAction::Continue
+        }
+
+        Message::Close(_) => WebSocketMessageAction::Reconnect,
+
+        _ => WebSocketMessageAction::Continue,
+    }
+}
+
 fn websocket_loop(endpoint: String, updates: Sender<MonitorUpdate>, notifications: Sender<()>) {
     let endpoint = match websocket_url(&endpoint) {
         Ok(endpoint) => endpoint,
@@ -164,33 +206,10 @@ fn websocket_loop(endpoint: String, updates: Sender<MonitorUpdate>, notification
                 loop {
                     match socket.read() {
                         Ok(message) => {
-                            if updates.send(MonitorUpdate::Heartbeat).is_err() {
-                                return;
-                            }
-
-                            match message {
-                                Message::Text(payload) => {
-                                    let Some((method, gid)) =
-                                        parse_lifecycle_notification(payload.as_str())
-                                    else {
-                                        continue;
-                                    };
-
-                                    if updates
-                                        .send(MonitorUpdate::Status(format!("{method} · {gid}")))
-                                        .is_err()
-                                    {
-                                        return;
-                                    }
-
-                                    if notifications.send(()).is_err() {
-                                        return;
-                                    }
-                                }
-
-                                Message::Close(_) => break,
-
-                                _ => {}
+                            match handle_websocket_message(message, &updates, &notifications) {
+                                WebSocketMessageAction::Continue => {}
+                                WebSocketMessageAction::Reconnect => break,
+                                WebSocketMessageAction::Shutdown => return,
                             }
                         }
 
