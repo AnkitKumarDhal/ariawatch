@@ -1,3 +1,5 @@
+use crate::logging;
+
 // Handles aria2 websocket notifications and recongition
 use super::MonitorUpdate;
 use std::{net::TcpStream, sync::mpsc::Sender, thread, time::Duration};
@@ -125,10 +127,12 @@ fn run_websocket_session(
             }
 
             Err(error) => {
+                logging::warn(&format!("WebSocket disconnected: {error}"));
+
                 if updates
-                    .send(MonitorUpdate::Status(format!(
-                        "Websocket disconnected: {error}"
-                    )))
+                    .send(MonitorUpdate::Status(
+                        "WebSocket disconnected; reconnecting".to_owned(),
+                    ))
                     .is_err()
                 {
                     return WebSocketSessionAction::Shutdown;
@@ -149,7 +153,10 @@ pub(super) fn websocket_loop(
     let endpoint = match websocket_url(&endpoint) {
         Ok(endpoint) => endpoint,
         Err(error) => {
-            let _ = updates.send(MonitorUpdate::Status(error));
+            logging::error(&format!("Invalid WebSocket endpoing: {error}"));
+            let _ = updates.send(MonitorUpdate::Status(
+                "WebSocket unavailable; check ARIA2_RPC_URL".to_owned(),
+            ));
             return;
         }
     };
@@ -174,10 +181,11 @@ pub(super) fn websocket_loop(
                 }
 
                 if let Err(error) = configure_read_timeout(&mut socket) {
+                    logging::error(&format!("Could not configure websocket timeout: {error}"));
                     if updates
-                        .send(MonitorUpdate::Status(format!(
-                            "Could not configure websocket timeout: {error}"
-                        )))
+                        .send(MonitorUpdate::Status(
+                            "WebSocket setup failed; retrying".to_owned(),
+                        ))
                         .is_err()
                     {
                         return;
@@ -198,10 +206,11 @@ pub(super) fn websocket_loop(
             }
 
             Err(error) => {
+                logging::warn(&format!("WebSocket connection failed: {error}"));
                 if updates
-                    .send(MonitorUpdate::Status(format!(
-                        "WebSocket connection failed: {error}"
-                    )))
+                    .send(MonitorUpdate::Status(
+                        "WebSocket connection failed; retrying".to_owned(),
+                    ))
                     .is_err()
                 {
                     return;

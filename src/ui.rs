@@ -1,5 +1,5 @@
 // Renders the actual UI and terminal input
-use crate::{app_state::AppState, monitor::MonitorUpdate};
+use crate::{app_state::AppState, logging, monitor::MonitorUpdate};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -152,7 +152,10 @@ fn event_loop(
                     Ok(()) => {
                         status_message = "Snapshot Synchronized".to_owned();
                     }
-                    Err(error) => status_message = format!("Snapshot rejected: {error}"),
+                    Err(error) => {
+                        logging::error(&format!("Snapshot rejected: {error}"));
+                        status_message = "Snapshot rejected; see log".to_owned();
+                    }
                 },
 
                 MonitorUpdate::Progress(downloads) => {

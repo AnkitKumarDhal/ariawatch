@@ -12,6 +12,7 @@ use crate::app::run;
 // Runs the application entry point
 fn main() {
     if let Err(error) = run() {
+        logging::error(&format!("Application failed: {error}"));
         eprintln!("ariawatch: {error}");
         std::process::exit(1);
     }

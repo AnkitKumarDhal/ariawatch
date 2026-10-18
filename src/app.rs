@@ -48,14 +48,13 @@ pub fn run() -> Result<(), String> {
         let download = match response.into_download() {
             Ok(download) => download,
             Err(error) => {
-                eprintln!("Skipping invalid download: {error}");
                 logging::warn(&format!("Skipping invalid download: {error}"));
                 continue;
             }
         };
 
         if let Err(error) = state.add_download(download) {
-            eprintln!("Could not track download: {error}")
+            logging::warn(&format!("Could not track download: {error}"));
         }
     }
 
