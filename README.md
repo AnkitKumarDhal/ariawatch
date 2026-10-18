@@ -74,6 +74,7 @@ The log contains timestamped application messages and diagnostic errors. Check i
 - Waiting and stopped download lists are limited to the first 1,000 entries each; pagination is not implemented.
 - AriaWatch monitors an existing aria2 instance and does not manage download actions.
 - The application currently supports one configured aria2 endpoint.
+- There is no way to scroll between downloads or look at more details for one specific download yet.
 
 ## References
 
