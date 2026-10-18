@@ -1,8 +1,19 @@
-use std::{sync::mpsc::Sender, thread, time::Duration};
-
-use tungstenite::{Message, stream::MaybeTlsStream};
-
 use super::MonitorUpdate;
+use std::{net::TcpStream, sync::mpsc::Sender, thread, time::Duration};
+use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
+
+#[derive(Debug, PartialEq, Eq)]
+enum WebSocketMessageAction {
+    Continue,
+    Reconnect,
+    Shutdown,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WebSocketSessionAction {
+    Reconnect,
+    Shutdown,
+}
 
 fn websocket_url(endpoint: &str) -> Result<String, String> {
     if let Some(address) = endpoint.strip_prefix("http://") {
@@ -30,13 +41,6 @@ fn parse_lifecycle_notification(payload: &str) -> Option<(String, String)> {
         .unwrap_or("unknown GID");
 
     Some((method.to_owned(), gid.to_owned()))
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum WebSocketMessageAction {
-    Continue,
-    Reconnect,
-    Shutdown,
 }
 
 fn handle_websocket_message(
@@ -74,6 +78,64 @@ fn handle_websocket_message(
     }
 }
 
+fn configure_read_timeout(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+) -> std::io::Result<()> {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => stream.set_read_timeout(Some(Duration::from_secs(1))),
+
+        MaybeTlsStream::Rustls(stream) => {
+            stream.sock.set_read_timeout(Some(Duration::from_secs(1)))
+        }
+
+        _ => Ok(()),
+    }
+}
+
+fn run_websocket_session(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    updates: &Sender<MonitorUpdate>,
+    notifications: &Sender<()>,
+) -> WebSocketSessionAction {
+    loop {
+        match socket.read() {
+            Ok(message) => match handle_websocket_message(message, updates, notifications) {
+                WebSocketMessageAction::Continue => {}
+                WebSocketMessageAction::Reconnect => {
+                    return WebSocketSessionAction::Reconnect;
+                }
+                WebSocketMessageAction::Shutdown => {
+                    return WebSocketSessionAction::Shutdown;
+                }
+            },
+
+            Err(tungstenite::Error::Io(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                if updates.send(MonitorUpdate::Heartbeat).is_err() {
+                    return WebSocketSessionAction::Shutdown;
+                }
+            }
+
+            Err(error) => {
+                if updates
+                    .send(MonitorUpdate::Status(format!(
+                        "Websocket disconnected: {error}"
+                    )))
+                    .is_err()
+                {
+                    return WebSocketSessionAction::Shutdown;
+                }
+
+                return WebSocketSessionAction::Reconnect;
+            }
+        }
+    }
+}
+
 pub(super) fn websocket_loop(
     endpoint: String,
     updates: Sender<MonitorUpdate>,
@@ -106,22 +168,10 @@ pub(super) fn websocket_loop(
                     return;
                 }
 
-                let timeout_result = match socket.get_mut() {
-                    MaybeTlsStream::Plain(stream) => {
-                        stream.set_read_timeout(Some(Duration::from_secs(1)))
-                    }
-
-                    MaybeTlsStream::Rustls(stream) => {
-                        stream.sock.set_read_timeout(Some(Duration::from_secs(1)))
-                    }
-
-                    _ => Ok(()),
-                };
-
-                if let Err(error) = timeout_result {
+                if let Err(error) = configure_read_timeout(&mut socket) {
                     if updates
                         .send(MonitorUpdate::Status(format!(
-                            "Could not configure websocket timeout: {error}",
+                            "Could not configure websocket timeout: {error}"
                         )))
                         .is_err()
                     {
@@ -136,40 +186,9 @@ pub(super) fn websocket_loop(
                     return;
                 }
 
-                loop {
-                    match socket.read() {
-                        Ok(message) => {
-                            match handle_websocket_message(message, &updates, &notifications) {
-                                WebSocketMessageAction::Continue => {}
-                                WebSocketMessageAction::Reconnect => break,
-                                WebSocketMessageAction::Shutdown => return,
-                            }
-                        }
-
-                        Err(tungstenite::Error::Io(error))
-                            if matches!(
-                                error.kind(),
-                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                            ) =>
-                        {
-                            if updates.send(MonitorUpdate::Heartbeat).is_err() {
-                                return;
-                            }
-                        }
-
-                        Err(error) => {
-                            if updates
-                                .send(MonitorUpdate::Status(format!(
-                                    "WebSocket disconnected: {error}"
-                                )))
-                                .is_err()
-                            {
-                                return;
-                            }
-
-                            break;
-                        }
-                    }
+                match run_websocket_session(&mut socket, &updates, &notifications) {
+                    WebSocketSessionAction::Reconnect => {}
+                    WebSocketSessionAction::Shutdown => return,
                 }
             }
 
