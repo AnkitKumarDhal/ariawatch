@@ -28,10 +28,19 @@ pub struct Aria2RpcResponse {
     pub error: Option<Aria2RpcError>,
 }
 
+// Represents a URI associated with an aria2 file
+#[derive(Debug, Deserialize)]
+pub struct Aria2UriResponse {
+    pub uri: String,
+    pub status: String,
+}
+
 // Represents a file entry in an aria2 response
 #[derive(Debug, Deserialize)]
 pub struct Aria2FileResponse {
     pub path: String,
+    #[serde(default)]
+    pub uris: Vec<Aria2UriResponse>,
 }
 
 // Represents download data returned by aria2
@@ -44,6 +53,12 @@ pub struct Aria2DownloadResponse {
     pub completed_length: String,
     pub download_speed: String,
     pub files: Vec<Aria2FileResponse>,
+
+    #[serde(default)]
+    pub dir: Option<String>,
+
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 pub fn parse_rpc_response(json: &str) -> Result<Aria2RpcResponse, String> {
@@ -92,7 +107,9 @@ fn download_keys() -> serde_json::Value {
         "totalLength",
         "completedLength",
         "downloadSpeed",
-        "files"
+        "files",
+        "dir",
+        "error_message"
     ])
 }
 
@@ -228,6 +245,14 @@ impl Aria2DownloadResponse {
             .map(String::from)
             .unwrap_or_else(|| self.gid.clone());
 
+        let source_url = self
+            .files
+            .iter()
+            .flat_map(|file| file.uris.iter())
+            .find(|uri| uri.status.as_str() == "used")
+            .or_else(|| self.files.iter().flat_map(|file| file.uris.iter()).next())
+            .map(|uri| uri.uri.clone());
+
         let total_length = parse_u64_field("totalLength", &self.total_length)?;
         let completed_length = parse_u64_field("completedLength", &self.completed_length)?;
         let download_speed = parse_u64_field("downloadSpeed", &self.download_speed)?;
@@ -240,6 +265,9 @@ impl Aria2DownloadResponse {
             completed_length,
             download_speed,
             status,
+            self.dir,
+            source_url,
+            self.error_message,
         ))
     }
 }

@@ -10,6 +10,9 @@ pub struct Download {
     pub downloaded: u64,
     pub speed: u64,
     pub status: Status,
+    pub directory: Option<String>,
+    pub source_url: Option<String>,
+    pub error_message: Option<String>,
 }
 
 impl Download {
@@ -20,6 +23,9 @@ impl Download {
         downloaded: u64,
         speed: u64,
         status: Status,
+        directory: Option<String>,
+        source_url: Option<String>,
+        error_message: Option<String>,
     ) -> Self {
         Self {
             gid,
@@ -28,11 +34,29 @@ impl Download {
             downloaded,
             speed,
             status,
+            directory,
+            source_url,
+            error_message,
         }
     }
 
     pub fn remaining_bytes(&self) -> u64 {
         self.size.saturating_sub(self.downloaded)
+    }
+
+    pub fn estimated_remaining_seconds(&self) -> Option<u64> {
+        if self.speed == 0 || self.size == 0 {
+            return None;
+        }
+
+        let remaining = self.remaining_bytes();
+        let mut seconds = remaining / self.speed;
+
+        if remaining % self.speed != 0 {
+            seconds += 1;
+        }
+
+        Some(seconds)
     }
 
     pub fn percentage_downloaded(&self) -> Option<f64> {
@@ -58,6 +82,9 @@ mod tests {
             downloaded,
             0,
             Status::Active,
+            None,
+            None,
+            None,
         )
     }
 
@@ -70,6 +97,9 @@ mod tests {
             4_000_000_000,
             8_000_000,
             Status::Waiting,
+            None,
+            None,
+            None,
         );
 
         let expected = Download {
@@ -79,6 +109,9 @@ mod tests {
             downloaded: 4_000_000_000,
             speed: 8_000_000,
             status: Status::Waiting,
+            directory: None,
+            source_url: None,
+            error_message: None,
         };
 
         assert_eq!(actual, expected);
@@ -93,6 +126,9 @@ mod tests {
             4_000_000_000,
             8_000_000,
             Status::Waiting,
+            None,
+            None,
+            None,
         );
 
         let actual = download.remaining_bytes();
@@ -110,6 +146,9 @@ mod tests {
             4_000_000_000,
             8_000_000,
             Status::Waiting,
+            None,
+            None,
+            None,
         );
         let actual = download.percentage_downloaded();
         let expected = Some(28.57142857142857);
@@ -142,5 +181,20 @@ mod tests {
         let download = make_download(100, 120);
 
         assert_eq!(download.percentage_downloaded(), Some(100.0));
+    }
+
+    #[test]
+    fn estimated_remaining_seconds_rounds_up() {
+        let mut download = make_download(1000, 1);
+        download.speed = 400;
+
+        assert_eq!(download.estimated_remaining_seconds(), Some(3));
+    }
+
+    #[test]
+    fn estimated_remaining_seconds_returns_none_when_speed_is_zero() {
+        let download = make_download(100, 0);
+
+        assert_eq!(download.estimated_remaining_seconds(), None);
     }
 }
