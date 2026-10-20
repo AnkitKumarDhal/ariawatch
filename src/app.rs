@@ -1,8 +1,13 @@
 // Actual starter and init of the application
-use crate::{app_state::AppState, aria2, cli::Cli, logging, monitor, ui};
+use crate::{
+    app_state::AppState,
+    aria2,
+    config::{RuntimeConfig, RuntimeMode},
+    logging, monitor, ui,
+};
 
 // Connectst o aria2 and starts the monitor and TUI
-pub fn run(cli: Cli) -> Result<(), String> {
+pub fn run(config: RuntimeConfig) -> Result<(), String> {
     match logging::init() {
         Ok(path) => {
             logging::info(&format!("Ariawatch starting; log file: {}", path.display()));
@@ -14,16 +19,13 @@ pub fn run(cli: Cli) -> Result<(), String> {
 
     println!("ariawatch");
 
-    if !cli.external {
-        return Err("Managed mode is not implemented yet. During development, use `ariawatch --external` to connect to an existing aria2 server".to_owned());
-    }
+    let (endpoint, rpc_secret) = match config.mode {
+        RuntimeMode::Managed => {
+            return Err("Managed mode is not implemented yet. During development, use `ariawatch --external` to connect to an existing aria2 server".to_owned());
+        }
 
-    let endpoint = cli
-        .rpc_url
-        .or_else(|| std::env::var("ARIA2_RPC_URL").ok())
-        .unwrap_or_else(|| String::from("http://127.0.0.1:6800/jsonrpc"));
-
-    let rpc_secret = std::env::var("ARIA2_RPC_SECRET").ok();
+        RuntimeMode::External(external) => (external.rpc_url, external.rpc_secret),
+    };
 
     let request_json = aria2::build_get_version_request(rpc_secret.as_deref())
         .map_err(|error| format!("Could not build RPC request: {error}"))?;

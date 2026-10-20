@@ -3,19 +3,21 @@ mod app;
 mod app_state;
 mod aria2;
 mod cli;
+mod config;
 mod domain;
 mod logging;
 mod monitor;
 mod ui;
 
-use crate::{app::run, cli::Cli};
+use crate::{app::run, cli::Cli, config::RuntimeConfig};
 use clap::Parser;
 
 // Runs the application entry point
 fn main() {
     let cli = Cli::parse();
+    let config = RuntimeConfig::from_cli(cli);
 
-    if let Err(error) = run(cli) {
+    if let Err(error) = run(config) {
         logging::error(&format!("Application failed: {error}"));
         eprintln!("ariawatch: {error}");
         std::process::exit(1);
