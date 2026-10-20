@@ -359,3 +359,34 @@ fn event_loop(
         }
     }
 }
+
+// Tests for duration formatting
+#[cfg(test)]
+mod tests {
+    use super::format_duration;
+
+    #[test]
+    fn formats_unknown_duration() {
+        assert_eq!(format_duration(None), "N/A");
+    }
+
+    #[test]
+    fn formats_seconds() {
+        assert_eq!(format_duration(Some(59)), "59s");
+    }
+
+    #[test]
+    fn formats_minutes_and_seconds() {
+        assert_eq!(format_duration(Some(125)), "2m 5s");
+    }
+
+    #[test]
+    fn formats_hours_and_minutes() {
+        assert_eq!(format_duration(Some(3661)), "1h 1m");
+    }
+
+    #[test]
+    fn formats_days_and_hours() {
+        assert_eq!(format_duration(Some(90_061)), "1D 1h");
+    }
+}
