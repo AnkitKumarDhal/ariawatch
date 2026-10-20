@@ -160,6 +160,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     frame.render_widget(table, sections[1]);
 
     // now comes the "more info" box on the download
+    // the reason i call it the "more info" box is because i have no clue what its actually called :3
     let details_title = selected_download
         .map(|download| format!(" Selected download: {} ", download.name))
         .unwrap_or_else(|| String::from(" Selected download "));
