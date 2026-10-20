@@ -12,6 +12,9 @@ It connects to aria2 through JSON-RPC and displays download progress in a live t
 - Periodic progress updates and snapshot reconciliation.
 - File-based diagnostic logging.
 - Configurable RPC endpoint and optional authentication secret.
+- Keyboard navigation using arrow keys or Vim-style `j`/`k` keys.
+- Selected download highlighting and automatic table scrolling.
+- Detailed view of the selected download, including ETA, downloaded and remaining size, destination, source URI, and errors.
 
 ## Requirements
 
@@ -58,7 +61,7 @@ env ARIA2_RPC_URL=http://127.0.0.1:6800/jsonrpc \
 
 `ARIA2_RPC_URL` is optional when using the default endpoint. `ARIA2_RPC_SECRET` is optional when the aria2 server has no RPC secret configured, though using a secret is recommended.
 
-Press `q`, `Q`, or `Esc` to quit the dashboard.
+Navigate downloads with `↑` / `↓` or `j` / `k`. Press `q`, `Q`, or `Esc` to quit the dashboard.
 
 ## Logging
 
@@ -75,7 +78,6 @@ The active log is rotated when it reaches approximately 1 MiB. The previous log 
 - Waiting and stopped download lists are limited to the first 1,000 entries each; pagination is not implemented.
 - AriaWatch monitors an existing aria2 instance and does not manage download actions.
 - The application currently supports one configured aria2 endpoint.
-- There is no way to scroll between downloads or look at more details for one specific download yet.
 
 ## References
 
