@@ -109,7 +109,7 @@ fn download_keys() -> serde_json::Value {
         "downloadSpeed",
         "files",
         "dir",
-        "error_message"
+        "errorMessage"
     ])
 }
 
