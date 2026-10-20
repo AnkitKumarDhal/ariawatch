@@ -1,12 +1,8 @@
 // Actual starter and init of the application
-use crate::{
-    app_state::AppState,
-    aria2,
-    config::{RuntimeConfig, RuntimeMode},
-    logging, monitor, ui,
-};
+use crate::{app_state::AppState, backend, config::RuntimeConfig, logging, ui};
 
 // Connectst o aria2 and starts the monitor and TUI
+// FINALLY its smaller now lol
 pub fn run(config: RuntimeConfig) -> Result<(), String> {
     match logging::init() {
         Ok(path) => {
@@ -19,49 +15,27 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
 
     println!("ariawatch");
 
-    let (endpoint, rpc_secret) = match config.mode {
-        RuntimeMode::Managed => {
-            return Err("Managed mode is not implemented yet. During development, use `ariawatch --external` to connect to an existing aria2 server".to_owned());
-        }
-
-        RuntimeMode::External(external) => (external.rpc_url, external.rpc_secret),
-    };
-
-    let request_json = aria2::build_get_version_request(rpc_secret.as_deref())
-        .map_err(|error| format!("Could not build RPC request: {error}"))?;
-    println!("Calling aria2.getVersion at {endpoint}");
-
-    let response_json = aria2::send_rpc_request(&endpoint, &request_json)?;
-    let rpc_response = aria2::parse_rpc_response(&response_json)?;
-    let rpc_result = rpc_response.into_result("ariawatch-1")?;
-    let version = rpc_result
-        .get("version")
-        .and_then(|value| value.as_str())
-        .unwrap_or("unknown");
+    let backend = backend::create_backend(config)?;
+    let version = backend.get_version()?;
 
     println!("Connected to aria2 version: {version}");
     logging::info(&format!("Connected to aria2 version: {version}"));
 
-    let (active_count, waiting_count, stopped_count, all_downloads) =
-        aria2::fetch_all_downloads(&endpoint, rpc_secret.as_deref())?;
+    let snapshot = backend.fetch_snapshot()?;
+
     println!(
-        "Fetched downloads: {active_count} active, {waiting_count} waiting, {stopped_count} stopped"
+        "Fetched downloads: {} active, {} waiting, {} stopped",
+        snapshot.active_count, snapshot.waiting_count, snapshot.stopped_count
     );
+
     logging::info(&format!(
-        "Initial snapshots: {active_count} active, {waiting_count} waiting, {stopped_count} stopped"
+        "Initial downloads: {} active, {} waiting, {} stopped",
+        snapshot.active_count, snapshot.waiting_count, snapshot.stopped_count
     ));
 
     let mut state = AppState::new();
 
-    for response in all_downloads {
-        let download = match response.into_download() {
-            Ok(download) => download,
-            Err(error) => {
-                logging::warn(&format!("Skipping invalid download: {error}"));
-                continue;
-            }
-        };
-
+    for download in snapshot.downloads {
         if let Err(error) = state.add_download(download) {
             logging::warn(&format!("Could not track download: {error}"));
         }
@@ -69,7 +43,7 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
 
     println!("Tracked downloads: {}", state.download_count());
 
-    let updates = monitor::start(endpoint.clone(), rpc_secret.clone(), state.active_gids())?;
+    let updates = backend.start_montior(state.active_gids())?;
     ui::run(state, updates)?;
 
     Ok(())

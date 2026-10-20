@@ -1,6 +1,6 @@
-use std::env;
-
+// this file has all the configs about the connections
 use crate::cli::Cli;
+use std::env;
 
 pub const DEFAULT_RPC_URL: &str = "http://127.0.0.1:6800/jsonrpc";
 

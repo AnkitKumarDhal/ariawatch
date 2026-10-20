@@ -2,6 +2,7 @@
 mod app;
 mod app_state;
 mod aria2;
+mod backend;
 mod cli;
 mod config;
 mod domain;
