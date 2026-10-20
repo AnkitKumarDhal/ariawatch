@@ -88,38 +88,56 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     let selected_download = state.selected_download();
     let selected_gid = selected_download.map(|download| download.gid.as_str());
 
-    let rows = state.downloads().iter().map(|download| {
-        let progress = match download.percentage_downloaded() {
-            Some(percent) => format!("{percent:.1}%"),
-            None => String::from("N/A"),
-        };
-
-        let speed = format!("{}/s", format_bytes(download.speed));
-        let remaining = format_bytes(download.remaining_bytes());
-
-        let is_selected = Some(download.gid.as_str()) == selected_gid;
-
-        // this is the cursor hehe
-        let name = if is_selected {
-            format!("▶ {}", download.name)
-        } else {
-            format!("  {}", download.name)
-        };
-
-        let row = Row::new(vec![
-            Cell::from(name),
-            Cell::from(download.status.label()),
-            Cell::from(progress),
-            Cell::from(speed),
-            Cell::from(remaining),
-        ]);
-
-        if is_selected {
-            row.style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
-        } else {
-            row
-        }
+    let selected_index = selected_gid.and_then(|gid| {
+        state
+            .downloads()
+            .iter()
+            .position(|download| download.gid.as_str() == gid)
     });
+
+    let visible_rows = sections[1].height.saturating_sub(3) as usize;
+
+    let first_visible_index = selected_index
+        .map(|index| index.saturating_add(1).saturating_sub(visible_rows))
+        .unwrap_or(0);
+
+    let rows = state
+        .downloads()
+        .iter()
+        .skip(first_visible_index)
+        .take(visible_rows)
+        .map(|download| {
+            let progress = match download.percentage_downloaded() {
+                Some(percent) => format!("{percent:.1}%"),
+                None => String::from("N/A"),
+            };
+
+            let speed = format!("{}/s", format_bytes(download.speed));
+            let remaining = format_bytes(download.remaining_bytes());
+
+            let is_selected = Some(download.gid.as_str()) == selected_gid;
+
+            // this is the cursor hehe
+            let name = if is_selected {
+                format!("▶ {}", download.name)
+            } else {
+                format!("  {}", download.name)
+            };
+
+            let row = Row::new(vec![
+                Cell::from(name),
+                Cell::from(download.status.label()),
+                Cell::from(progress),
+                Cell::from(speed),
+                Cell::from(remaining),
+            ]);
+
+            if is_selected {
+                row.style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+            } else {
+                row
+            }
+        });
 
     let table = Table::new(
         rows,
@@ -311,13 +329,24 @@ fn event_loop(
 
             match event {
                 Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press
-                        && matches!(
-                            key.code,
-                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
-                        )
-                    {
-                        return Ok(());
+                    if key.kind == KeyEventKind::Press {
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                                return Ok(());
+                            }
+
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                state.select_next();
+                                redraw_needed = true;
+                            }
+
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                state.select_previous();
+                                redraw_needed = true;
+                            }
+
+                            _ => {}
+                        }
                     }
                 }
 
