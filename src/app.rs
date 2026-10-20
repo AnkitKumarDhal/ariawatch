@@ -43,7 +43,7 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
 
     println!("Tracked downloads: {}", state.download_count());
 
-    let updates = backend.start_montior(state.active_gids())?;
+    let updates = backend.start_monitor(state.active_gids())?;
     ui::run(state, updates)?;
 
     Ok(())

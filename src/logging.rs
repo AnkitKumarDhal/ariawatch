@@ -7,6 +7,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::paths::AppPaths;
+
 const MAX_LOG_SIZE: u64 = 1024 * 1024;
 struct LogFile {
     file: std::fs::File,
@@ -16,21 +18,13 @@ struct LogFile {
 static LOG_FILE: OnceLock<Mutex<LogFile>> = OnceLock::new();
 
 pub fn init() -> Result<PathBuf, String> {
-    let state_dir = std::env::var("XDG_STATE_HOME")
-        .ok()
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
-        })
-        .ok_or_else(|| String::from("Could not determine state directory"))?;
+    let paths = AppPaths::discover()?;
 
-    let log_dir = state_dir.join("ariawatch");
-
-    fs::create_dir_all(&log_dir)
+    fs::create_dir_all(&paths.state_dir)
         .map_err(|error| format!("Could not create log directory: {error}"))?;
 
-    let log_path = log_dir.join("ariawatch.log");
+    let log_path = paths.state_dir.join("ariawatch.log");
+
     let file = OpenOptions::new()
         .create(true)
         .append(true)

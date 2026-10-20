@@ -8,6 +8,7 @@ mod config;
 mod domain;
 mod logging;
 mod monitor;
+mod paths;
 mod ui;
 
 use crate::{app::run, cli::Cli, config::RuntimeConfig};

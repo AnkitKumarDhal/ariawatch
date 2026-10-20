@@ -18,7 +18,7 @@ pub struct DownloadSnapshot {
 pub trait DownloadBackend {
     fn get_version(&self) -> Result<String, String>;
     fn fetch_snapshot(&self) -> Result<DownloadSnapshot, String>;
-    fn start_montior(
+    fn start_monitor(
         &self,
         initial_active_gids: Vec<String>,
     ) -> Result<Receiver<MonitorUpdate>, String>;
@@ -71,7 +71,7 @@ impl DownloadBackend for ExternalAria2Backend {
         })
     }
 
-    fn start_montior(
+    fn start_monitor(
         &self,
         initial_active_gids: Vec<String>,
     ) -> Result<Receiver<MonitorUpdate>, String> {
