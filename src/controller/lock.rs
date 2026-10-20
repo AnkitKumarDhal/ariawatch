@@ -1,3 +1,4 @@
+// this file, it holds the lock
 use std::{
     fs::{File, OpenOptions},
     io,
@@ -8,7 +9,6 @@ use std::{
     path::Path,
 };
 
-// this file, it holds the lock
 #[derive(Debug)]
 pub struct ControllerLock {
     _file: File,
