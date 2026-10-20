@@ -1,3 +1,4 @@
+// this file is the epitome of directory/path handling
 use std::{env, path::PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +10,7 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
+    // automatically sniffs out the paths
     pub fn discover() -> Result<Self, String> {
         Self::from_values(
             env::var_os("HOME").map(PathBuf::from),
@@ -19,6 +21,7 @@ impl AppPaths {
         )
     }
 
+    // *helps* with the automatic sniffing of paths
     fn from_values(
         home: Option<PathBuf>,
         data_home: Option<PathBuf>,
@@ -67,6 +70,34 @@ impl AppPaths {
             state_dir: state_home.join("ariawatch"),
             runtime_dir,
         })
+    }
+
+    // now comes the persistence part (kinda excited)
+    // I'll explain each one (i need those explanations for myself)
+    //
+    // this one makes the actual persistent history file (in sqlite)
+    pub fn database_file(&self) -> PathBuf {
+        self.data_dir.join("history.sqlite3")
+    }
+
+    // this one is just the aria2 session file
+    pub fn aria2_session_file(&self) -> PathBuf {
+        self.data_dir.join("aria2.session")
+    }
+
+    // this one is for the socket controller
+    pub fn controller_socket_file(&self) -> PathBuf {
+        self.runtime_dir.join("controller.sock")
+    }
+
+    // this one is for the controller pid value
+    pub fn controller_pid_file(&self) -> PathBuf {
+        self.runtime_dir.join("controller.pid")
+    }
+
+    // this one is for the ocntroller lock
+    pub fn controller_lock_file(&self) -> PathBuf {
+        self.runtime_dir.join("controller.lock")
     }
 }
 
@@ -142,6 +173,34 @@ mod tests {
         assert_eq!(
             paths.runtime_dir,
             PathBuf::from("/home/test/.cache/ariawatch/runtime")
+        );
+    }
+
+    #[test]
+    fn resolves_controller_artifact_paths() {
+        let paths =
+            AppPaths::from_values(Some(PathBuf::from("/home/test")), None, None, None, None)
+                .unwrap();
+
+        assert_eq!(
+            paths.database_file(),
+            PathBuf::from("/home/test/.local/share/ariawatch/history.sqlite3")
+        );
+        assert_eq!(
+            paths.aria2_session_file(),
+            PathBuf::from("/home/test/.local/share/ariawatch/aria2.session")
+        );
+        assert_eq!(
+            paths.controller_socket_file(),
+            PathBuf::from("/home/test/.cache/ariawatch/runtime/controller.sock")
+        );
+        assert_eq!(
+            paths.controller_pid_file(),
+            PathBuf::from("/home/test/.cache/ariawatch/runtime/controller.pid")
+        );
+        assert_eq!(
+            paths.controller_lock_file(),
+            PathBuf::from("/home/test/.cache/ariawatch/runtime/controller.lock")
         );
     }
 }
