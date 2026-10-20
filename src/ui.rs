@@ -14,18 +14,60 @@ use ratatui::{
     },
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table},
 };
 use std::{io, sync::mpsc::Receiver, time::Duration};
 
+// just formats the size by like B, KiB, MiB, and such
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+    let mut value = bytes as f64;
+    let mut unit = 0;
+
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.2} {}", UNITS[unit])
+    }
+}
+
+// now this one does the same but for time rmeaining (i wonder how i can reuse this and the one above)
+fn format_duration(seconds: Option<u64>) -> String {
+    let Some(seconds) = seconds else {
+        return String::from("N/A");
+    };
+
+    let days = seconds / 86_400;
+    let hours = (seconds & 86_400) / 3_600;
+    let minutes = (seconds & 3_600) / 60;
+    let remaining_seconds = seconds % 60;
+
+    if days > 0 {
+        format!("{days}D {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else if minutes > 0 {
+        format!("{minutes}m {remaining_seconds}s")
+    } else {
+        format!("{remaining_seconds}s")
+    }
+}
+
 // public function to draw the TUI
 pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
-    // 3 sections for the TUI
+    // 4 sections for the TUI
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
+            Constraint::Length(9),
             Constraint::Length(3),
         ])
         .split(frame.area());
@@ -43,6 +85,9 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     let table_header = Row::new(["Name", "Status", "Progress", "Speed", "Remaining"])
         .style(Style::default().add_modifier(Modifier::BOLD));
 
+    let selected_download = state.selected_download();
+    let selected_gid = selected_download.map(|download| download.gid.as_str());
+
     let rows = state.downloads().iter().map(|download| {
         let progress = match download.percentage_downloaded() {
             Some(percent) => format!("{percent:.1}%"),
@@ -55,13 +100,28 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
             download.remaining_bytes() as f64 / 1024.0 / 1024.0 / 1024.0
         );
 
-        Row::new(vec![
-            Cell::from(download.name.as_str()),
+        let is_selected = Some(download.gid.as_str()) == selected_gid;
+
+        // this is the cursor hehe
+        let name = if is_selected {
+            format!("▶ {}", download.name)
+        } else {
+            format!("  {}", download.name)
+        };
+
+        let row = Row::new(vec![
+            Cell::from(name),
             Cell::from(download.status.label()),
             Cell::from(progress),
             Cell::from(speed),
             Cell::from(remaining),
-        ])
+        ]);
+
+        if is_selected {
+            row.style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+        } else {
+            row
+        }
     });
 
     let table = Table::new(
@@ -84,6 +144,70 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
 
     frame.render_widget(table, sections[1]);
 
+    // now comes the "more info" box on the download
+    let details_title = selected_download
+        .map(|download| format!(" Selected download: {} ", download.name))
+        .unwrap_or_else(|| String::from(" Selected download "));
+
+    let details_block = Block::default().borders(Borders::ALL).title(details_title);
+
+    let details_inner = details_block.inner(sections[2]);
+    frame.render_widget(details_block, sections[2]);
+
+    let details_sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(details_inner);
+
+    if let Some(download) = selected_download {
+        let mut details = vec![
+            Line::from(format!(
+                "Status: {}  |  ETA: {}",
+                download.status.label(),
+                format_duration(download.estimated_remaining_seconds())
+            )),
+            Line::from(format!(
+                "Downloaded: {} / {}  |  Remaining: {}",
+                format_bytes(download.downloaded),
+                format_bytes(download.size),
+                format_bytes(download.remaining_bytes())
+            )),
+            Line::from(format!("Speed: {}/s", format_bytes(download.speed))),
+            Line::from(format!(
+                "Destination: {}",
+                download.directory.as_deref().unwrap_or("N/A")
+            )),
+            Line::from(format!(
+                "Source URI: {}",
+                download.source_url.as_deref().unwrap_or("N/A")
+            )),
+        ];
+
+        if let Some(error) = download
+            .error_message
+            .as_deref()
+            .filter(|message| !message.trim().is_empty())
+        {
+            details.push(Line::from(format!("Error: {error}")));
+        }
+
+        frame.render_widget(Paragraph::new(details), details_sections[0]);
+
+        let progress = download.percentage_downloaded();
+        let ratio = progress.unwrap_or(0.0).clamp(0.0, 100.0) / 100.0;
+        let label = progress
+            .map(|percent| format!("{percent:.1}%"))
+            .unwrap_or_else(|| String::from("N/A"));
+
+        let gauge = Gauge::default().ratio(ratio).label(label);
+        frame.render_widget(gauge, details_sections[1]);
+    } else {
+        frame.render_widget(
+            Paragraph::new("No downloads to inspect yet."),
+            details_sections[0],
+        );
+    }
+
     // Footer content
     let footer = Paragraph::new(format!(
         " {status_message} · {} active · q: quit",
@@ -91,7 +215,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     ))
     .block(Block::default().borders(Borders::ALL));
 
-    frame.render_widget(footer, sections[2]);
+    frame.render_widget(footer, sections[3]);
 }
 
 // Function to ope nthe terminal dashboard nad handle keyboard input
