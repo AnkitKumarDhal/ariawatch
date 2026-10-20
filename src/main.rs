@@ -5,6 +5,7 @@ mod aria2;
 mod backend;
 mod cli;
 mod config;
+mod controller;
 mod domain;
 mod logging;
 mod monitor;

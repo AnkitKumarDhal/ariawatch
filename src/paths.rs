@@ -101,6 +101,7 @@ impl AppPaths {
     }
 
     // now it comes time for the actual directory making
+    // and it completley licked my brain smooth
     #[cfg(unix)]
     pub fn prepare_runtime_dir(&self) -> Result<(), String> {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -156,6 +157,7 @@ impl AppPaths {
             ));
         }
 
+        // Ooouuuu unsafe :3 scary
         let current_uid = unsafe { libc::geteuid() };
 
         if metadata.uid() != current_uid {
