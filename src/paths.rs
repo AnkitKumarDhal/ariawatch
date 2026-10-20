@@ -99,6 +99,89 @@ impl AppPaths {
     pub fn controller_lock_file(&self) -> PathBuf {
         self.runtime_dir.join("controller.lock")
     }
+
+    // now it comes time for the actual directory making
+    #[cfg(unix)]
+    pub fn prepare_runtime_dir(&self) -> Result<(), String> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        match std::fs::symlink_metadata(&self.runtime_dir) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "Runtime directory must not be a symbolic link: {}",
+                    self.runtime_dir.display()
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(format!(
+                    "Runtime path is not a directory: {}",
+                    self.runtime_dir.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir_all(&self.runtime_dir).map_err(|error| {
+                    format!(
+                        "Could not create runtime directory {}: {error}",
+                        self.runtime_dir.display()
+                    )
+                })?;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Could not inspect runtime directory {}: {error}",
+                    self.runtime_dir.display()
+                ));
+            }
+        }
+
+        let metadata = std::fs::symlink_metadata(&self.runtime_dir).map_err(|error| {
+            format!(
+                "COuld not inspect runtime directory {}: {error}",
+                self.runtime_dir.display()
+            )
+        })?;
+
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "Runtime directory must not be a symbolic link: {}",
+                self.runtime_dir.display()
+            ));
+        }
+
+        if !metadata.is_dir() {
+            return Err(format!(
+                "Runtime path is not a directory: {}",
+                self.runtime_dir.display()
+            ));
+        }
+
+        let current_uid = unsafe { libc::geteuid() };
+
+        if metadata.uid() != current_uid {
+            return Err(format!(
+                "Runtime directory is not owned by the current user: {}",
+                self.runtime_dir.display()
+            ));
+        }
+
+        std::fs::set_permissions(&self.runtime_dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| {
+                format!(
+                    "Could not secure runtime directory {}: {error}",
+                    self.runtime_dir.display()
+                )
+            })?;
+
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    pub fn prepare_runtime_dir(&self) -> Result<(), String> {
+        Err(String::from(
+            "Secure runtime directory preparation is currently supported only on Unix",
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -202,5 +285,82 @@ mod tests {
             paths.controller_lock_file(),
             PathBuf::from("/home/test/.cache/ariawatch/runtime/controller.lock")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creates_runtime_directory_with_private_permissions() {
+        use std::{
+            fs,
+            os::unix::fs::PermissionsExt,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let root = std::env::temp_dir().join(format!(
+            "ariawatch-runtime-test-{}-{unique_id}",
+            std::process::id()
+        ));
+
+        let paths = AppPaths {
+            data_dir: root.join("data"),
+            config_dir: root.join("config"),
+            state_dir: root.join("state"),
+            runtime_dir: root.join("runtime"),
+        };
+
+        paths.prepare_runtime_dir().unwrap();
+
+        let metadata = fs::symlink_metadata(&paths.runtime_dir).unwrap();
+
+        assert!(metadata.is_dir());
+        assert!(!metadata.file_type().is_symlink());
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_runtime_directory_symlinks() {
+        use std::{fs, os::unix::fs::symlink};
+
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let root = std::env::temp_dir().join(format!(
+            "ariawatch-symlink-test-{}-{unique_id}",
+            std::process::id()
+        ));
+
+        fs::create_dir_all(&root).unwrap();
+
+        let real_dir = root.join("real");
+        let runtime_link = root.join("runtime");
+
+        fs::create_dir(&real_dir).unwrap();
+        symlink(&real_dir, &runtime_link).unwrap();
+
+        let paths = AppPaths {
+            data_dir: root.join("data"),
+            config_dir: root.join("config"),
+            state_dir: root.join("state"),
+            runtime_dir: runtime_link,
+        };
+
+        let error = paths.prepare_runtime_dir().unwrap_err();
+
+        assert!(error.contains("symbolic link"));
+
+        // The directory targeted by the symbolic link remains untouched.
+        assert!(real_dir.is_dir());
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

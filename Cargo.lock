@@ -88,6 +88,7 @@ version = "0.2.0"
 dependencies = [
  "clap",
  "crossterm",
+ "libc",
  "ratatui",
  "reqwest",
  "serde",

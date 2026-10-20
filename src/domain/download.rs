@@ -52,7 +52,7 @@ impl Download {
         let remaining = self.remaining_bytes();
         let mut seconds = remaining / self.speed;
 
-        if remaining % self.speed != 0 {
+        if !remaining.is_multiple_of(self.speed) {
             seconds += 1;
         }
 
