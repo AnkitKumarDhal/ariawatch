@@ -44,8 +44,8 @@ fn format_duration(seconds: Option<u64>) -> String {
     };
 
     let days = seconds / 86_400;
-    let hours = (seconds & 86_400) / 3_600;
-    let minutes = (seconds & 3_600) / 60;
+    let hours = (seconds % 86_400) / 3_600;
+    let minutes = (seconds % 3_600) / 60;
     let remaining_seconds = seconds % 60;
 
     if days > 0 {
@@ -82,7 +82,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     frame.render_widget(header, sections[0]);
 
     // Download table content
-    let table_header = Row::new(["Name", "Status", "Progress", "Speed", "Remaining"])
+    let table_header = Row::new(["  Name", "Status", "Progress", "Speed", "Remaining"])
         .style(Style::default().add_modifier(Modifier::BOLD));
 
     let selected_download = state.selected_download();
