@@ -94,11 +94,8 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
             None => String::from("N/A"),
         };
 
-        let speed = format!("{} B/s", download.speed);
-        let remaining = format!(
-            "{:.2} GiB",
-            download.remaining_bytes() as f64 / 1024.0 / 1024.0 / 1024.0
-        );
+        let speed = format!("{}/s", format_bytes(download.speed));
+        let remaining = format_bytes(download.remaining_bytes());
 
         let is_selected = Some(download.gid.as_str()) == selected_gid;
 
