@@ -8,7 +8,8 @@ use std::{
     io::{self, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 pub use lock::ControllerLock;
@@ -41,6 +42,42 @@ impl ControllerInstance {
 
 pub fn ensure_running(paths: &AppPaths) -> Result<(), String> {
     launcher::ensure_running(paths)
+}
+
+pub fn stop(paths: &AppPaths) -> Result<(), String> {
+    let response = ipc::send_command(paths, "STOP")?;
+
+    if response != "STOPPING" {
+        return Err(format!(
+            "Unexpected response when stopping controller: {response}"
+        ));
+    }
+
+    let pid_file = paths.controller_pid_file();
+    let deadline = Instant::now() + Duration::from_secs(10);
+
+    loop {
+        match fs::symlink_metadata(&pid_file) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                logging::info("Managed controller stopped successfully");
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(error) => {
+                return Err(format!(
+                    "Could not check controller shutdown status: {error}"
+                ));
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(String::from(
+                "Controller acknowledged shutdown but did not stop within 10 seconds",
+            ));
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 // just runs internal controller (testing)
