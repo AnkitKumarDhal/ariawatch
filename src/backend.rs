@@ -1,11 +1,13 @@
-use std::sync::mpsc::Receiver;
+use std::{fs, path::Path, sync::mpsc::Receiver};
 
 use crate::{
     aria2,
-    config::{ExternalServerConfig, RuntimeConfig, RuntimeMode},
+    config::{DEFAULT_RPC_URL, ExternalServerConfig, RuntimeConfig, RuntimeMode},
+    controller,
     domain::download::Download,
     logging,
     monitor::{self, MonitorUpdate},
+    paths::AppPaths,
 };
 
 pub struct DownloadSnapshot {
@@ -85,9 +87,58 @@ impl DownloadBackend for ExternalAria2Backend {
 
 pub fn create_backend(config: RuntimeConfig) -> Result<Box<dyn DownloadBackend>, String> {
     match config.mode {
-        RuntimeMode::Managed => Err("Managed mode is not implemented yet. The background controller will provide this backend.".to_owned()),
-        RuntimeMode::External(external) => {
-            Ok(Box::new(ExternalAria2Backend::new(external)))
+        RuntimeMode::Managed => {
+            let paths = AppPaths::discover()?;
+            controller::ensure_running(&paths)?;
+
+            let rpc_secret = read_managed_rpc_secret(&paths.rpc_secret_file())?;
+            let server = ExternalServerConfig {
+                rpc_url: DEFAULT_RPC_URL.to_owned(),
+                rpc_secret: Some(rpc_secret),
+            };
+
+            Ok(Box::new(ExternalAria2Backend::new(server)))
         }
+
+        RuntimeMode::External(external) => Ok(Box::new(ExternalAria2Backend::new(external))),
+    }
+}
+
+fn read_managed_rpc_secret(path: &Path) -> Result<String, String> {
+    let contents = fs::read_to_string(path).map_err(|error| {
+        format!(
+            "Could not read managed aria2 RPC secret at {}: {error}",
+            path.display()
+        )
+    })?;
+
+    validate_managed_rpc_secret(&contents)
+}
+
+fn validate_managed_rpc_secret(contents: &str) -> Result<String, String> {
+    let secret = contents.trim();
+
+    if secret.len() != 64 || !secret.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(String::from(
+            "The managed aria2 RPC secret is missing or malformed",
+        ));
+    }
+
+    Ok(secret.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn accepts_a_valid_managed_rpc_secret() {
+        let secret = "a".repeat(64);
+
+        assert_eq!(super::validate_managed_rpc_secret(&secret).unwrap(), secret);
+    }
+
+    #[test]
+    fn rejects_a_malformed_managed_rpc_secret() {
+        assert!(super::validate_managed_rpc_secret("not-a-secret").is_err());
+        assert!(super::validate_managed_rpc_secret("").is_err());
     }
 }

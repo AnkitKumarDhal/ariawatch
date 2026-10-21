@@ -279,6 +279,7 @@ fn prepare_session_file(path: &Path) -> Result<(), String> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
         .open(path)

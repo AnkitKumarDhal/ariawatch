@@ -39,6 +39,10 @@ impl ControllerInstance {
     }
 }
 
+pub fn ensure_running(paths: &AppPaths) -> Result<(), String> {
+    launcher::ensure_running(paths)
+}
+
 // just runs internal controller (testing)
 pub fn run_internal() -> Result<(), String> {
     logging::init().map_err(|error| format!("Could not initialize controller logging: {error}"))?;
