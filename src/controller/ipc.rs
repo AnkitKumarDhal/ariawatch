@@ -151,6 +151,40 @@ pub fn run(paths: &AppPaths) -> Result<(), String> {
     Ok(())
 }
 
+// this *sends* the command (only one) to the running controller and reads its response
+pub(super) fn send_command(paths: &AppPaths, command: &str) -> Result<String, String> {
+    if command.is_empty()
+        || command.len() > MAX_COMMAND_LENGTH
+        || command.contains('\n')
+        || command.contains('\r')
+    {
+        return Err(String::from("Invalid IPC command"));
+    }
+
+    let socket_path = paths.controller_socket_file();
+
+    let mut stream = UnixStream::connect(&socket_path).map_err(|error| {
+        format!(
+            "Could not connect to controller socket {}: {error}",
+            socket_path.display()
+        )
+    })?;
+
+    stream
+        .set_read_timeout(Some(CLIENT_TIMEOUT))
+        .map_err(|error| format!("Could not set IPC read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(CLIENT_TIMEOUT))
+        .map_err(|error| format!("Could not set IPC write timeout: {error}"))?;
+
+    stream
+        .write_all(command.as_bytes())
+        .and_then(|()| stream.write_all(b"\n"))
+        .map_err(|error| format!("Could not send IPC command: {error}"))?;
+
+    read_command(&mut stream).map_err(|error| format!("Could not read IPC response: {error}"))
+}
+
 // run() runs the server loop, and this handle_connection() handles one connected client at a time
 fn handle_connection(mut stream: UnixStream) -> Result<bool, String> {
     stream

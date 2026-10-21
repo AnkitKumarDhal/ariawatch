@@ -1,4 +1,5 @@
 mod ipc;
+mod launcher;
 mod lock;
 
 use std::{
@@ -11,7 +12,7 @@ use std::{
 
 pub use lock::ControllerLock;
 
-use crate::paths::AppPaths;
+use crate::{logging, paths::AppPaths};
 
 pub struct ControllerInstance {
     _lock: ControllerLock,
@@ -39,6 +40,27 @@ impl ControllerInstance {
 
 // just runs internal controller (testing)
 pub fn run_internal() -> Result<(), String> {
+    logging::init().map_err(|error| format!("Could not initialize controller logging: {error}"))?;
+    logging::info("Controller bootstrap started");
+
+    #[cfg(target_os = "linux")]
+    {
+        let result = unsafe { libc::daemon(1, 0) };
+
+        if result != 0 {
+            let error = io::Error::last_os_error();
+            logging::error(&format!("Controller detachment failed: {error}"));
+            return Err(format!("Could not detach controller: {error}"));
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        return Err(String::from(
+            "Background controller startup currently supports only Linux",
+        ));
+    }
+
     let paths = AppPaths::discover()?;
     let _instance = ControllerInstance::acquire(&paths)?;
 
