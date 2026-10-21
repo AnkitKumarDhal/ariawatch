@@ -1,5 +1,12 @@
 // Actual starter and init of the application
-use crate::{app_state::AppState, backend, config::RuntimeConfig, logging, ui};
+use crate::{
+    app_state::AppState,
+    backend,
+    config::{RuntimeConfig, RuntimeMode},
+    controller, logging,
+    paths::AppPaths,
+    ui,
+};
 
 // Connectst o aria2 and starts the monitor and TUI
 // FINALLY its smaller now lol
@@ -14,6 +21,8 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     }
 
     println!("ariawatch");
+
+    let managed_mode = matches!(&config.mode, RuntimeMode::Managed);
 
     let backend = backend::create_backend(config)?;
     let version = backend.get_version()?;
@@ -44,7 +53,11 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     println!("Tracked downloads: {}", state.download_count());
 
     let updates = backend.start_monitor(state.active_gids())?;
-    ui::run(state, updates)?;
+    let exit_choice = ui::run(state, updates, managed_mode)?;
+    if exit_choice == ui::ExitChoice::StopController {
+        let paths = AppPaths::discover()?;
+        controller::stop(&paths)?;
+    }
 
     Ok(())
 }

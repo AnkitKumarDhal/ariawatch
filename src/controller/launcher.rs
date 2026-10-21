@@ -72,7 +72,6 @@ mod tests {
         fs,
         io::{Read, Write},
         os::unix::{fs::PermissionsExt, net::UnixListener},
-        path::PathBuf,
         thread,
         time::{SystemTime, UNIX_EPOCH},
     };

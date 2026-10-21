@@ -9,14 +9,77 @@ use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
     layout::{
+        Alignment,
         Constraint::{self},
-        Direction, Layout,
+        Direction, Layout, Rect,
     },
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table},
 };
 use std::{io, sync::mpsc::Receiver, time::Duration};
+
+// this is for the choice of how to exit the applciation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitChoice {
+    LeaveRunning,
+    StopController,
+}
+
+// layout of the central box that shows the quit options
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical_padding = (100 - percent_y) / 2;
+    let horizontal_padding = (100 - percent_x) / 2;
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(vertical_padding),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage(100 - vertical_padding - percent_y),
+        ])
+        .split(area);
+
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(horizontal_padding),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage(100 - horizontal_padding - percent_x),
+        ])
+        .split(vertical[1]);
+
+    horizontal[1]
+}
+
+// this just draws the thing above
+fn draw_exit_dialog(frame: &mut Frame<'_>) {
+    let area = centered_rect(70, 40, frame.area());
+    frame.render_widget(Clear, area);
+
+    let dialog = Paragraph::new(vec![
+        Line::from("What should happen to your downloads?"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("[L]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Leave downloads running and exit"),
+        ]),
+        Line::from(vec![
+            Span::styled("[S]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Stop managed aria2 and exit"),
+        ]),
+        Line::from(""),
+        Line::from("[Esc/C] Cancel and return to the dashboard"),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Exit AriaWatch "),
+    );
+
+    frame.render_widget(dialog, area);
+}
 
 // just formats the size by like B, KiB, MiB, and such
 fn format_bytes(bytes: u64) -> String {
@@ -60,7 +123,13 @@ fn format_duration(seconds: Option<u64>) -> String {
 }
 
 // public function to draw the TUI
-pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
+pub fn draw(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    status_message: &str,
+    managed_mode: bool,
+    show_exit_dialog: bool,
+) {
     // 4 sections for the TUI
     let sections = Layout::default()
         .direction(Direction::Vertical)
@@ -225,17 +294,32 @@ pub fn draw(frame: &mut Frame<'_>, state: &AppState, status_message: &str) {
     }
 
     // Footer content
+
+    let exit_hint = if managed_mode {
+        "q: exit options"
+    } else {
+        "q: quit"
+    };
+
     let footer = Paragraph::new(format!(
-        " {status_message} · {} active · q: quit",
+        " {status_message} · {} active · {exit_hint}",
         state.active_download_count()
     ))
     .block(Block::default().borders(Borders::ALL));
 
     frame.render_widget(footer, sections[3]);
+
+    if show_exit_dialog {
+        draw_exit_dialog(frame);
+    }
 }
 
 // Function to ope nthe terminal dashboard nad handle keyboard input
-pub fn run(mut state: AppState, updates: Receiver<MonitorUpdate>) -> Result<(), String> {
+pub fn run(
+    mut state: AppState,
+    updates: Receiver<MonitorUpdate>,
+    managed_mode: bool,
+) -> Result<ExitChoice, String> {
     enable_raw_mode().map_err(|error| format!("Could not enable raw mode: {error}"))?;
 
     let mut stdout = io::stdout();
@@ -257,7 +341,7 @@ pub fn run(mut state: AppState, updates: Receiver<MonitorUpdate>) -> Result<(), 
         }
     };
 
-    let app_result = event_loop(&mut terminal, &mut state, &updates);
+    let app_result = event_loop(&mut terminal, &mut state, &updates, managed_mode);
 
     let cursor_result = terminal
         .show_cursor()
@@ -269,12 +353,12 @@ pub fn run(mut state: AppState, updates: Receiver<MonitorUpdate>) -> Result<(), 
     let screen_result = execute!(io::stdout(), LeaveAlternateScreen)
         .map_err(|error| format!("Could not leave alternate screen: {error}"));
 
-    app_result?;
+    let exit_choice = app_result?;
     cursor_result?;
     raw_mode_result?;
     screen_result?;
 
-    Ok(())
+    Ok(exit_choice)
 }
 
 // Handles keyboard input
@@ -282,9 +366,11 @@ fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut AppState,
     updates: &Receiver<MonitorUpdate>,
-) -> Result<(), String> {
+    managed_mode: bool,
+) -> Result<ExitChoice, String> {
     let mut status_message = "Starting live monitor".to_owned();
     let mut redraw_needed = true;
+    let mut show_exit_dialog = false;
     loop {
         for update in updates.try_iter() {
             match update {
@@ -316,7 +402,15 @@ fn event_loop(
 
         if redraw_needed {
             terminal
-                .draw(|frame| draw(frame, state, &status_message))
+                .draw(|frame| {
+                    draw(
+                        frame,
+                        state,
+                        &status_message,
+                        managed_mode,
+                        show_exit_dialog,
+                    )
+                })
                 .map_err(|error| format!("Could not draw dashboard: {error}"))?;
 
             redraw_needed = false;
@@ -331,22 +425,46 @@ fn event_loop(
             match event {
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Press {
-                        match key.code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                                return Ok(());
-                            }
+                        if show_exit_dialog {
+                            match key.code {
+                                KeyCode::Char('l') | KeyCode::Char('L') => {
+                                    return Ok(ExitChoice::LeaveRunning);
+                                }
 
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                state.select_next();
-                                redraw_needed = true;
-                            }
+                                KeyCode::Char('s') | KeyCode::Char('S') => {
+                                    return Ok(ExitChoice::StopController);
+                                }
 
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                state.select_previous();
-                                redraw_needed = true;
-                            }
+                                KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Esc => {
+                                    show_exit_dialog = false;
+                                    redraw_needed = true;
+                                }
 
-                            _ => {}
+                                _ => {}
+                            }
+                        } else {
+                            match key.code {
+                                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                                    if managed_mode {
+                                        show_exit_dialog = true;
+                                        redraw_needed = true;
+                                    } else {
+                                        return Ok(ExitChoice::LeaveRunning);
+                                    }
+                                }
+
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    state.select_next();
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    state.select_previous();
+                                    redraw_needed = true;
+                                }
+
+                                _ => {}
+                            }
                         }
                     }
                 }
