@@ -100,6 +100,10 @@ impl AppPaths {
         self.runtime_dir.join("controller.lock")
     }
 
+    pub fn rpc_secret_file(&self) -> PathBuf {
+        self.runtime_dir.join("aria2-rpc.secret")
+    }
+
     // now it comes time for the actual directory making
     // and it completley licked my brain smooth
     #[cfg(unix)]
@@ -286,6 +290,10 @@ mod tests {
         assert_eq!(
             paths.controller_lock_file(),
             PathBuf::from("/home/test/.cache/ariawatch/runtime/controller.lock")
+        );
+        assert_eq!(
+            paths.rpc_secret_file(),
+            PathBuf::from("/home/test/.cache/ariawatch/runtime/aria2-rpc.secret")
         );
     }
 

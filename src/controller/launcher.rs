@@ -6,7 +6,7 @@ use std::{
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
-const RETRY_INTERVAL: Duration = Duration::from_secs(50);
+const RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 // starts the controller if required and then waits for its response
 #[allow(dead_code)] // just for the time being

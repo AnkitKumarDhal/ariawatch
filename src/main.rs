@@ -21,6 +21,7 @@ fn main() {
 
     if cli.controller {
         if let Err(error) = controller::run_internal() {
+            logging::error(&format!("Controller failed: {error}"));
             eprintln!("ariawatch: {error}");
             std::process::exit(1);
         }

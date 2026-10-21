@@ -1,3 +1,4 @@
+mod aria2_process;
 mod ipc;
 mod launcher;
 mod lock;
@@ -63,6 +64,8 @@ pub fn run_internal() -> Result<(), String> {
 
     let paths = AppPaths::discover()?;
     let _instance = ControllerInstance::acquire(&paths)?;
+
+    let _aria2 = aria2_process::ManagedAria2::start(&paths)?;
 
     ipc::run(&paths)
 }
