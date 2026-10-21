@@ -18,6 +18,16 @@ use clap::Parser;
 // Runs the application entry point
 fn main() {
     let cli = Cli::parse();
+
+    if cli.controller {
+        if let Err(error) = controller::run_internal() {
+            eprintln!("ariawatch: {error}");
+            std::process::exit(1);
+        }
+
+        return;
+    }
+
     let config = RuntimeConfig::from_cli(cli);
 
     if let Err(error) = run(config) {

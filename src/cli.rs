@@ -9,6 +9,9 @@ pub struct Cli {
     #[arg(long)]
     pub external: bool,
 
+    #[arg(long, hide = true, conflicts_with = "external")]
+    pub controller: bool,
+
     #[arg(long, value_name = "URL", requires = "external")]
     pub rpc_url: Option<String>,
 }
@@ -22,7 +25,7 @@ mod tests {
     fn defaults_to_managed_mode() {
         let cli = Cli::try_parse_from(["ariawatch"]).unwrap();
 
-        assert!(!cli.external);
+        assert!(!cli.controller);
         assert_eq!(cli.rpc_url, None);
     }
 
@@ -49,5 +52,29 @@ mod tests {
             Cli::try_parse_from(["ariawatch", "--rpc-url", "http://127.0.0.1:6800/jsonrpc"]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn accepts_hidden_controller_mode() {
+        let cli = Cli::try_parse_from(["ariawatch", "--controller"]).unwrap();
+
+        assert!(cli.controller);
+        assert!(!cli.external);
+        assert_eq!(cli.rpc_url, None);
+    }
+
+    #[test]
+    fn controller_mode_conflicts_with_external_mode() {
+        let result = Cli::try_parse_from(["ariawatch", "--controller", "--external"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn controller_flag_is_hidden_from_help() {
+        let error = Cli::try_parse_from(["ariawatch", "--help"]).unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+        assert!(!error.to_string().contains("--controller"));
     }
 }
