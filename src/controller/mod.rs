@@ -1,3 +1,4 @@
+mod ipc;
 mod lock;
 
 use std::{
@@ -41,9 +42,7 @@ pub fn run_internal() -> Result<(), String> {
     let paths = AppPaths::discover()?;
     let _instance = ControllerInstance::acquire(&paths)?;
 
-    Err(String::from(
-        "Internal controller mode is recognized but controller service startup is not implemented yet.",
-    ))
+    ipc::run(&paths)
 }
 
 impl Drop for ControllerInstance {

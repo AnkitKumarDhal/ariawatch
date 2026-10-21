@@ -26,6 +26,7 @@ mod tests {
         let cli = Cli::try_parse_from(["ariawatch"]).unwrap();
 
         assert!(!cli.controller);
+        assert!(!cli.external);
         assert_eq!(cli.rpc_url, None);
     }
 
