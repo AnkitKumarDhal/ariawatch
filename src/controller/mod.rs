@@ -4,7 +4,7 @@ use std::{
     fs::{self, OpenOptions},
     io::{self, Write},
     os::unix::fs::OpenOptionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -40,7 +40,7 @@ impl Drop for ControllerInstance {
     fn drop(&mut self) {
         let is_our_pid_file = fs::symlink_metadata(&self.pid_file)
             .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-            & fs::read_to_string(&self.pid_file)
+            && fs::read_to_string(&self.pid_file)
                 .is_ok_and(|contents| contents.trim() == self.pid.to_string());
 
         if is_our_pid_file {
@@ -49,7 +49,7 @@ impl Drop for ControllerInstance {
     }
 }
 
-fn write_pid_automatically(path: &PathBuf, pid: u32) -> Result<(), String> {
+fn write_pid_automatically(path: &Path, pid: u32) -> Result<(), String> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
