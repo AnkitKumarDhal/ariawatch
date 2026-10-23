@@ -53,29 +53,44 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 }
 
 // this just draws the thing above
-fn draw_exit_dialog(frame: &mut Frame<'_>) {
-    let area = centered_rect(70, 40, frame.area());
+fn draw_exit_dialog(frame: &mut Frame<'_>, selected: usize) {
+    let area = centered_rect(40, 20, frame.area());
     frame.render_widget(Clear, area);
 
+    let option = |label: &str, index: usize| {
+        let text = if selected == index {
+            format!("› {label}")
+        } else {
+            format!("  {label}")
+        };
+
+        let style = if selected == index {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+
+        Span::styled(text, style)
+    };
+
     let dialog = Paragraph::new(vec![
+        Line::from(""),
         Line::from("What should happen to your downloads?"),
         Line::from(""),
         Line::from(vec![
-            Span::styled("[L]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" Leave downloads running and exit"),
+            option("[L] Leave", 0),
+            Span::raw("   "),
+            option("[S] Stop aria2", 1),
+            Span::raw("   "),
+            option("[C / Esc] Cancel", 2),
         ]),
-        Line::from(vec![
-            Span::styled("[S]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" Stop managed aria2 and exit"),
-        ]),
-        Line::from(""),
-        Line::from("[Esc/C] Cancel and return to the dashboard"),
     ])
     .alignment(Alignment::Center)
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Exit AriaWatch "),
+            .title(" Exit AriaWatch ")
+            .title_alignment(Alignment::Center),
     );
 
     frame.render_widget(dialog, area);
@@ -129,6 +144,7 @@ pub fn draw(
     status_message: &str,
     managed_mode: bool,
     show_exit_dialog: bool,
+    selected_exit_option: usize,
 ) {
     // 4 sections for the TUI
     let sections = Layout::default()
@@ -310,7 +326,7 @@ pub fn draw(
     frame.render_widget(footer, sections[3]);
 
     if show_exit_dialog {
-        draw_exit_dialog(frame);
+        draw_exit_dialog(frame, selected_exit_option);
     }
 }
 
@@ -371,6 +387,8 @@ fn event_loop(
     let mut status_message = "Starting live monitor".to_owned();
     let mut redraw_needed = true;
     let mut show_exit_dialog = false;
+    let mut selected_exit_option = 0_usize;
+
     loop {
         for update in updates.try_iter() {
             match update {
@@ -409,6 +427,7 @@ fn event_loop(
                         &status_message,
                         managed_mode,
                         show_exit_dialog,
+                        selected_exit_option,
                     )
                 })
                 .map_err(|error| format!("Could not draw dashboard: {error}"))?;
@@ -427,6 +446,25 @@ fn event_loop(
                     if key.kind == KeyEventKind::Press {
                         if show_exit_dialog {
                             match key.code {
+                                KeyCode::Left | KeyCode::Up => {
+                                    selected_exit_option = (selected_exit_option + 2) % 3;
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Right | KeyCode::Down => {
+                                    selected_exit_option = (selected_exit_option + 1) % 3;
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Enter => match selected_exit_option {
+                                    0 => return Ok(ExitChoice::LeaveRunning),
+                                    1 => return Ok(ExitChoice::StopController),
+                                    _ => {
+                                        show_exit_dialog = false;
+                                        redraw_needed = true;
+                                    }
+                                },
+
                                 KeyCode::Char('l') | KeyCode::Char('L') => {
                                     return Ok(ExitChoice::LeaveRunning);
                                 }

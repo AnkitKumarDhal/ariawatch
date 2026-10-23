@@ -178,7 +178,15 @@ impl ManagedAria2 {
         if let Ok(request) =
             aria2::build_rpc_request("aria2.shutdown", Vec::new(), Some(&self.rpc_secret))
         {
-            let _ = aria2::send_rpc_request(RPC_ENDPOINT, &request);
+            let endpoint = RPC_ENDPOINT.to_owned();
+
+            thread::spawn(move || {
+                if let Err(error) = aria2::send_rpc_request(&endpoint, &request) {
+                    logging::warn(&format!(
+                        "Graceful aria2 shutdown request returned an error: {error}"
+                    ));
+                }
+            });
         }
 
         if self.wait_for_exit(SHUTDOWN_TIMEOUT) {
