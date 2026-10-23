@@ -88,6 +88,29 @@ impl AppState {
         Ok(())
     }
 
+    pub fn remove_download(&mut self, gid: &str) -> Result<(), String> {
+        let index = self
+            .downloads
+            .iter()
+            .position(|download| download.gid.as_str() == gid)
+            .ok_or_else(|| format!("Download {gid} is not tracked"))?;
+
+        let was_selected = self.selected_gid.as_deref() == Some(gid);
+
+        self.downloads.remove(index);
+
+        if self.downloads.is_empty() {
+            self.selected_gid = None;
+        } else if was_selected {
+            let next_index = index.min(self.downloads.len() - 1);
+            self.selected_gid = Some(self.downloads[next_index].gid.clone());
+        } else if self.selected_gid.is_none() {
+            self.selected_gid = Some(self.downloads[0].gid.clone());
+        }
+
+        Ok(())
+    }
+
     // Updates existing download or tracks a new one
     pub fn upsert_download(&mut self, download: Download) {
         let gid = download.gid.clone();
@@ -237,5 +260,31 @@ mod tests {
 
         assert_eq!(state.selected_gid(), None);
         assert!(state.selected_download().is_none());
+    }
+
+    #[test]
+    fn removing_selected_download_selects_another_download() {
+        let mut state = AppState::new();
+
+        state.add_download(make_download("a", "first.zip")).unwrap();
+        state
+            .add_download(make_download("b", "second.zip"))
+            .unwrap();
+
+        state.remove_download("a").unwrap();
+
+        assert_eq!(state.selected_gid(), Some("b"));
+        assert_eq!(state.download_count(), 1);
+    }
+
+    #[test]
+    fn removing_last_download_clears_selection() {
+        let mut state = AppState::new();
+        state.add_download(make_download("a", "first.zip")).unwrap();
+
+        state.remove_download("a").unwrap();
+
+        assert_eq!(state.selected_gid(), None);
+        assert_eq!(state.download_count(), 0);
     }
 }

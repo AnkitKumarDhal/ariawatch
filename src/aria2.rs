@@ -2,7 +2,10 @@
 use crate::domain::{download::Download, status::Status};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 // Represents an aria2 JSON-RPC error
 #[derive(Debug, Deserialize)]
@@ -278,6 +281,93 @@ pub fn pause_all(endpoint: &str, rpc_secret: Option<&str>) -> Result<(), String>
 
 pub fn resume_all(endpoint: &str, rpc_secret: Option<&str>) -> Result<(), String> {
     run_all_action(endpoint, "aria2.unpauseAll", rpc_secret)
+}
+
+fn remove_download_result(
+    endpoint: &str,
+    gid: &str,
+    rpc_secret: Option<&str>,
+) -> Result<(), String> {
+    let result = call_rpc_method(
+        endpoint,
+        "aria2.removeDownloadResult",
+        vec![serde_json::json!(gid)],
+        rpc_secret,
+    )?;
+
+    if result.as_str() == Some("OK") {
+        Ok(())
+    } else {
+        Err(String::from(
+            "aria2.removeDownloadResult returned an unexpected result",
+        ))
+    }
+}
+
+pub fn remove_download(
+    endpoint: &str,
+    gid: &str,
+    status: &Status,
+    rpc_secret: Option<&str>,
+) -> Result<(), String> {
+    validate_gid(gid)?;
+
+    match status {
+        Status::Active | Status::Waiting | Status::Paused => {
+            let result = call_rpc_method(
+                endpoint,
+                "aria2.remove",
+                vec![serde_json::json!(gid)],
+                rpc_secret,
+            )?;
+
+            if result.as_str() != Some(gid) {
+                return Err(String::from("aria2.remove returned an unexpected result"));
+            }
+
+            remove_download_result(endpoint, gid, rpc_secret)
+        }
+
+        Status::Complete | Status::Error | Status::Removed => {
+            remove_download_result(endpoint, gid, rpc_secret)
+        }
+    }
+}
+
+// figures out the file path to be deleted
+pub fn get_download_file_paths(
+    endpoint: &str,
+    gid: &str,
+    rpc_secret: Option<&str>,
+) -> Result<Vec<PathBuf>, String> {
+    validate_gid(gid)?;
+
+    let result = call_rpc_method(
+        endpoint,
+        "aria2.getFiles",
+        vec![serde_json::json!(gid)],
+        rpc_secret,
+    )?;
+
+    let files = result
+        .as_array()
+        .ok_or_else(|| String::from("aria2.getFiles returned an invalid file list"))?;
+
+    files
+        .iter()
+        .enumerate()
+        .map(|(index, file)| {
+            let path = file
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .filter(|path| !path.trim().is_empty())
+                .ok_or_else(|| {
+                    format!("aria2.getFiles returned an invalid path for file {index}")
+                })?;
+
+            Ok(PathBuf::from(path))
+        })
+        .collect()
 }
 
 // Ask aria2 only for fields used by the current table

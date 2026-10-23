@@ -122,6 +122,44 @@ fn draw_add_dialog(frame: &mut Frame<'_>, input: &str) {
     frame.render_widget(dialog, area);
 }
 
+// draws the remove download dialog
+fn draw_remove_dialog(frame: &mut Frame<'_>, download_name: Option<&str>, delete_files: bool) {
+    let area = centered_rect(50, 28, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = if delete_files {
+        " Remove Download and Delete Files "
+    } else {
+        " Remove Download "
+    };
+
+    let warning = if delete_files {
+        "Downloaded files under ~/Downloads will be permanently deleted."
+    } else {
+        "The aria2 entry will be removed, but downloaded files will remain."
+    };
+
+    let dialog = Paragraph::new(vec![
+        Line::from(format!(
+            "Selected: {}",
+            download_name.unwrap_or("No download selected")
+        )),
+        Line::from(""),
+        Line::from(warning),
+        Line::from(""),
+        Line::from("Enter / Y: confirm    Esc / N: cancel"),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_alignment(Alignment::Center),
+    );
+
+    frame.render_widget(dialog, area);
+}
+
 // checks if input is a URI or not
 fn input_is_uri(input: &str) -> bool {
     let lower = input.to_ascii_lowercase();
@@ -200,6 +238,7 @@ pub fn draw(
     show_exit_dialog: bool,
     selected_exit_option: usize,
     add_input: Option<&str>,
+    pending_removal: Option<bool>,
 ) {
     // 4 sections for the TUI
     let sections = Layout::default()
@@ -367,9 +406,9 @@ pub fn draw(
     // Footer content
 
     let exit_hint = if managed_mode {
-        "a:add p:pause r:resume P/R:all q: exit options"
+        "a:add p:pause r:resume P/R:all x:remove X:delete+remove q: exit options"
     } else {
-        "a:add p:pause r:resume P/R:all q: quit"
+        "a:add p:pause r:resume P/R:all x:remove X:managed only q: quit"
     };
 
     let footer = Paragraph::new(format!(
@@ -386,6 +425,16 @@ pub fn draw(
 
     if let Some(input) = add_input {
         draw_add_dialog(frame, input);
+    }
+
+    if let Some(delete_files) = pending_removal {
+        draw_remove_dialog(
+            frame,
+            state
+                .selected_download()
+                .map(|download| download.name.as_str()),
+            delete_files,
+        );
     }
 }
 
@@ -450,6 +499,7 @@ fn event_loop(
     let mut show_exit_dialog = false;
     let mut selected_exit_option = 0_usize;
     let mut add_input: Option<String> = None;
+    let mut pending_removal: Option<bool> = None;
 
     loop {
         for update in updates.try_iter() {
@@ -491,6 +541,7 @@ fn event_loop(
                         show_exit_dialog,
                         selected_exit_option,
                         add_input.as_deref(),
+                        pending_removal,
                     )
                 })
                 .map_err(|error| format!("Could not draw dashboard: {error}"))?;
@@ -507,7 +558,66 @@ fn event_loop(
             match event {
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Press {
-                        if add_input.is_some() {
+                        if let Some(delete_files) = pending_removal {
+                            match key.code {
+                                KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                    let action_result = state.selected_download().map(|download| {
+                                        let gid = download.gid.clone();
+
+                                        let result: Result<String, String> = if delete_files {
+                                            backend.remove_download_and_delete_files(&gid, &download.status).map(|report| {
+                                                if report.failed_files == 0 {
+                                                    format!("Removed download; deleted {} file(s)", report.deleted_files)
+                                                } else {
+                                                    format!("Removed download; {} file deletion(s) failed (see log)", report.failed_files)
+                                                }
+                                            })
+                                        } else {
+                                            backend.remove_download(&gid, &download.status).map(|()| String::from("Removed download; files kept"))
+                                        };
+
+                                        (gid, result)
+                                    });
+
+                                    match action_result {
+                                        Some((gid, Ok(message))) => {
+                                            match state.remove_download(&gid) {
+                                                Ok(()) => status_message = message,
+                                                Err(error) => {
+                                                    logging::error(&format!(
+                                                        "aria2 removal succeeded but local state update failed: {error}"
+                                                    ));
+                                                    status_message = message;
+                                                }
+                                            }
+                                        }
+
+                                        Some((_, Err(error))) => {
+                                            logging::error(&format!(
+                                                "Download removal failed: {error}"
+                                            ));
+                                            status_message =
+                                                String::from("Removal failed; see logs");
+                                        }
+
+                                        None => {
+                                            status_message = String::from("No download selected")
+                                        }
+                                    }
+
+                                    pending_removal = None;
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                                    pending_removal = None;
+                                    status_message = String::from("Removal cancelled");
+                                    redraw_needed = true;
+                                }
+
+                                _ => {}
+                            }
+                        } else if add_input.is_some() {
                             match key.code {
                                 KeyCode::Enter => {
                                     let value =
@@ -679,6 +789,30 @@ fn event_loop(
                                         "Resume all downloads",
                                     );
                                     redraw_needed = true;
+                                }
+
+                                KeyCode::Char('x') => {
+                                    if state.selected_download().is_some() {
+                                        pending_removal = Some(false)
+                                    } else {
+                                        status_message = String::from("No download selected")
+                                    }
+
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Char('X') => {
+                                    if !managed_mode {
+                                        status_message = String::from(
+                                            "Deleting files is only available in managed mode",
+                                        )
+                                    } else if state.selected_download().is_some() {
+                                        pending_removal = Some(true)
+                                    } else {
+                                        status_message = String::from("No download selected")
+                                    }
+
+                                    redraw_needed = true
                                 }
 
                                 KeyCode::Down | KeyCode::Char('j') => {

@@ -2,18 +2,28 @@ use crate::{
     aria2,
     config::{DEFAULT_RPC_URL, ExternalServerConfig, RuntimeConfig, RuntimeMode},
     controller,
-    domain::download::Download,
+    domain::{download::Download, status::Status},
     logging,
     monitor::{self, MonitorUpdate},
     paths::AppPaths,
 };
-use std::{fs, path::Path, sync::mpsc::Receiver};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::mpsc::Receiver,
+};
 
 pub struct DownloadSnapshot {
     pub active_count: usize,
     pub waiting_count: usize,
     pub stopped_count: usize,
     pub downloads: Vec<Download>,
+}
+
+#[derive(Debug, Default)]
+pub struct FileDeleteReport {
+    pub deleted_files: usize,
+    pub failed_files: usize,
 }
 
 pub trait DownloadBackend {
@@ -31,16 +41,120 @@ pub trait DownloadBackend {
     fn resume_download(&self, gid: &str) -> Result<(), String>;
     fn pause_all(&self) -> Result<(), String>;
     fn resume_all(&self) -> Result<(), String>;
+
+    fn remove_download(&self, gid: &str, status: &Status) -> Result<(), String>;
+    fn remove_download_and_delete_files(
+        &self,
+        gid: &str,
+        status: &Status,
+    ) -> Result<FileDeleteReport, String>;
 }
 
 struct ExternalAria2Backend {
     config: ExternalServerConfig,
+    managed_mode: bool,
 }
 
 impl ExternalAria2Backend {
-    fn new(config: ExternalServerConfig) -> Self {
-        Self { config }
+    fn new(config: ExternalServerConfig, managed_mode: bool) -> Self {
+        Self {
+            config,
+            managed_mode,
+        }
     }
+}
+
+// managed controller starts aria2 with $HOME/Downloads as its directory
+fn managed_download_dir() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| String::from("Could not determine the home directory"))?;
+
+    let directory = home.join("Downloads");
+
+    let canonical = fs::canonicalize(&directory).map_err(|error| {
+        format!(
+            "Could not resolve managed download directory {}: {error}",
+            directory.display()
+        )
+    })?;
+
+    if !canonical.is_dir() {
+        return Err(String::from(
+            "Managed downlaod directory is not a directory",
+        ));
+    }
+
+    Ok(canonical)
+}
+
+// validate the files before deleting them
+fn collect_safe_files(paths: Vec<PathBuf>, directory: &Path) -> Result<Vec<PathBuf>, String> {
+    let canonical_directory = fs::canonicalize(directory).map_err(|error| {
+        format!(
+            "Could not resolve managed download directory {}: {error}",
+            directory.display()
+        )
+    })?;
+
+    let mut safe_files = Vec::new();
+
+    for path in paths {
+        let candidate = if path.is_absolute() {
+            path
+        } else {
+            canonical_directory.join(path)
+        };
+
+        let metadata = match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Could not inspect download file {}: {error}",
+                    candidate.display()
+                ));
+            }
+        };
+
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "Refusing to delete a symbolic link: {}",
+                candidate.display()
+            ));
+        }
+
+        if !metadata.is_file() {
+            return Err(format!(
+                "Refusing to delete a non-regular file: {}",
+                candidate.display()
+            ));
+        }
+
+        let canonical_file = fs::canonicalize(&candidate).map_err(|error| {
+            format!(
+                "Could not resolve download file {}: {error}",
+                candidate.display()
+            )
+        })?;
+
+        if canonical_file == canonical_directory
+            || !canonical_file.starts_with(&canonical_directory)
+        {
+            return Err(format!(
+                "Refusing to delete a file outside the managed download directory: {}",
+                canonical_file.display()
+            ));
+        }
+
+        safe_files.push(canonical_file);
+    }
+
+    safe_files.sort();
+    safe_files.dedup();
+
+    Ok(safe_files)
 }
 
 impl DownloadBackend for ExternalAria2Backend {
@@ -118,6 +232,59 @@ impl DownloadBackend for ExternalAria2Backend {
     fn resume_all(&self) -> Result<(), String> {
         aria2::resume_all(&self.config.rpc_url, self.config.rpc_secret.as_deref())
     }
+
+    fn remove_download(&self, gid: &str, status: &Status) -> Result<(), String> {
+        aria2::remove_download(
+            &self.config.rpc_url,
+            gid,
+            status,
+            self.config.rpc_secret.as_deref(),
+        )
+    }
+
+    fn remove_download_and_delete_files(
+        &self,
+        gid: &str,
+        status: &Status,
+    ) -> Result<FileDeleteReport, String> {
+        if !self.managed_mode {
+            return Err(String::from(
+                "Deleting downloaded files is only available in managed mode",
+            ));
+        }
+
+        let directory = managed_download_dir()?;
+        let file_paths = aria2::get_download_file_paths(
+            &self.config.rpc_url,
+            gid,
+            self.config.rpc_secret.as_deref(),
+        )?;
+        let safe_files = collect_safe_files(file_paths, &directory)?;
+
+        aria2::remove_download(
+            &self.config.rpc_url,
+            gid,
+            status,
+            self.config.rpc_secret.as_deref(),
+        )?;
+
+        let mut report = FileDeleteReport::default();
+
+        for path in safe_files {
+            match fs::remove_file(&path) {
+                Ok(()) => report.deleted_files += 1,
+                Err(error) => {
+                    report.failed_files += 1;
+                    logging::error(&format!(
+                        "Download was removed from aria2, but file deletion failed for {}: {error}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+
+        Ok(report)
+    }
 }
 
 pub fn create_backend(config: RuntimeConfig) -> Result<Box<dyn DownloadBackend>, String> {
@@ -132,10 +299,10 @@ pub fn create_backend(config: RuntimeConfig) -> Result<Box<dyn DownloadBackend>,
                 rpc_secret: Some(rpc_secret),
             };
 
-            Ok(Box::new(ExternalAria2Backend::new(server)))
+            Ok(Box::new(ExternalAria2Backend::new(server, true)))
         }
 
-        RuntimeMode::External(external) => Ok(Box::new(ExternalAria2Backend::new(external))),
+        RuntimeMode::External(external) => Ok(Box::new(ExternalAria2Backend::new(external, false))),
     }
 }
 
