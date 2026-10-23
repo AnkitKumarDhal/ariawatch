@@ -53,7 +53,7 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     println!("Tracked downloads: {}", state.download_count());
 
     let updates = backend.start_monitor(state.active_gids())?;
-    let exit_choice = ui::run(state, updates, managed_mode)?;
+    let exit_choice = ui::run(state, updates, managed_mode, backend.as_ref())?;
     if exit_choice == ui::ExitChoice::StopController {
         let paths = AppPaths::discover()?;
         controller::stop(&paths)?;

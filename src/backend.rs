@@ -1,5 +1,3 @@
-use std::{fs, path::Path, sync::mpsc::Receiver};
-
 use crate::{
     aria2,
     config::{DEFAULT_RPC_URL, ExternalServerConfig, RuntimeConfig, RuntimeMode},
@@ -9,6 +7,7 @@ use crate::{
     monitor::{self, MonitorUpdate},
     paths::AppPaths,
 };
+use std::{fs, path::Path, sync::mpsc::Receiver};
 
 pub struct DownloadSnapshot {
     pub active_count: usize,
@@ -24,6 +23,14 @@ pub trait DownloadBackend {
         &self,
         initial_active_gids: Vec<String>,
     ) -> Result<Receiver<MonitorUpdate>, String>;
+
+    fn add_uri(&self, uri: &str) -> Result<String, String>;
+    fn add_torrent_file(&self, path: &Path) -> Result<String, String>;
+
+    fn pause_download(&self, gid: &str) -> Result<(), String>;
+    fn resume_download(&self, gid: &str) -> Result<(), String>;
+    fn pause_all(&self) -> Result<(), String>;
+    fn resume_all(&self) -> Result<(), String>;
 }
 
 struct ExternalAria2Backend {
@@ -82,6 +89,34 @@ impl DownloadBackend for ExternalAria2Backend {
             self.config.rpc_secret.clone(),
             initial_active_gids,
         )
+    }
+
+    fn add_uri(&self, uri: &str) -> Result<String, String> {
+        aria2::add_uri(&self.config.rpc_url, uri, self.config.rpc_secret.as_deref())
+    }
+
+    fn add_torrent_file(&self, path: &Path) -> Result<String, String> {
+        aria2::add_torrent_file(
+            &self.config.rpc_url,
+            path,
+            self.config.rpc_secret.as_deref(),
+        )
+    }
+
+    fn pause_download(&self, gid: &str) -> Result<(), String> {
+        aria2::pause_download(&self.config.rpc_url, gid, self.config.rpc_secret.as_deref())
+    }
+
+    fn resume_download(&self, gid: &str) -> Result<(), String> {
+        aria2::resume_download(&self.config.rpc_url, gid, self.config.rpc_secret.as_deref())
+    }
+
+    fn pause_all(&self) -> Result<(), String> {
+        aria2::pause_all(&self.config.rpc_url, self.config.rpc_secret.as_deref())
+    }
+
+    fn resume_all(&self) -> Result<(), String> {
+        aria2::resume_all(&self.config.rpc_url, self.config.rpc_secret.as_deref())
     }
 }
 

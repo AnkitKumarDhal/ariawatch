@@ -1,7 +1,8 @@
 // Handles aria2 JSON-RPC requests and responses
 use crate::domain::{download::Download, status::Status};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{fs, path::Path};
 
 // Represents an aria2 JSON-RPC error
 #[derive(Debug, Deserialize)]
@@ -97,6 +98,186 @@ pub fn build_rpc_request(
 
 pub fn build_get_version_request(rpc_secret: Option<&str>) -> Result<String, String> {
     build_rpc_request("aria2.getVersion", Vec::new(), rpc_secret)
+}
+
+// normally RPC request allows a max of 2.0 MiB of transfer, so limiting it to 1.4MB is a good way
+// to not hit these limits
+const MAX_TORRENT_BYTES: u64 = 1_400_000;
+
+// does the request for adding a download link (even supports magnets)
+pub fn build_add_uri_request(uri: &str, rpc_secret: Option<&str>) -> Result<String, String> {
+    let uri = uri.trim();
+
+    if uri.is_empty() || uri.chars().any(char::is_whitespace) {
+        return Err(String::from("Download URI is empty or contains whitespace"));
+    }
+
+    let lower = uri.to_ascii_lowercase();
+    let supported = [
+        "http://", "https://", "ftp://", "ftps://", "sftp://", "magnet:?",
+    ];
+
+    if !supported.iter().any(|prefix| lower.starts_with(prefix)) {
+        return Err(String::from(
+            "Unsupported URI scheme; use HTTP(s), FTP(s), SFTP or a magnet URI",
+        ));
+    }
+
+    build_rpc_request("aria2.addUri", vec![serde_json::json!([uri])], rpc_secret)
+}
+
+// does the same thing as above, but for .torrent files
+pub fn build_add_torrent_request(
+    contents: &[u8],
+    rpc_secret: Option<&str>,
+) -> Result<String, String> {
+    if contents.is_empty() {
+        return Err(String::from("Torrent file is empty"));
+    }
+
+    if contents.len() as u64 > MAX_TORRENT_BYTES {
+        return Err(String::from("Torrent file exceeds the 1.4MB upload limit"));
+    }
+
+    let encoded = BASE64.encode(contents);
+
+    build_rpc_request(
+        "aria2.addTorrent",
+        vec![serde_json::json!(encoded)],
+        rpc_secret,
+    )
+}
+
+// re-usable rpc call method
+pub fn call_rpc_method(
+    endpoint: &str,
+    method: &str,
+    params: Vec<serde_json::Value>,
+    rpc_secret: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let request = build_rpc_request(method, params, rpc_secret)?;
+    let body = send_rpc_request(endpoint, &request)?;
+    let response = parse_rpc_response(&body)?;
+    response.into_result("ariawatch-1")
+}
+
+// checks the emptyness and type of the returned rpc result and then converst the answer (which is a
+// GID) into a string that contains the GID
+fn expect_gid(result: serde_json::Value, method: &str) -> Result<String, String> {
+    result
+        .as_str()
+        .filter(|gid| !gid.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| format!("{method} returned as an invalid GID"))
+}
+
+// automatically takes in a URI / magnet and builds the rpc request and submits it to aria2
+pub fn add_uri(endpoint: &str, uri: &str, rpc_secret: Option<&str>) -> Result<String, String> {
+    let request = build_add_uri_request(uri, rpc_secret)?;
+    let body = send_rpc_request(endpoint, &request)?;
+    let response = parse_rpc_response(&body)?;
+    let result = response.into_result("ariawatch-1")?;
+
+    expect_gid(result, "aria2.addUri")
+}
+
+// does the same as above but with .torrent files
+pub fn add_torrent_file(
+    endpoint: &str,
+    path: &Path,
+    rpc_secret: Option<&str>,
+) -> Result<String, String> {
+    let is_torrent = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"));
+
+    if !is_torrent {
+        return Err(String::from("Select a local .torrent file"));
+    }
+
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("Could not inspect torrent file {}: {error}", path.display()))?;
+
+    if !metadata.is_file() {
+        return Err(String::from("Torrent path is not a regular file"));
+    }
+
+    if metadata.len() == 0 || metadata.len() > MAX_TORRENT_BYTES {
+        return Err(String::from(
+            "Torrent file must be non-empty and no larger than 1.4MB",
+        ));
+    }
+
+    let contents = fs::read(path)
+        .map_err(|error| format!("Could not read torrent file {}: {error}", path.display()))?;
+
+    let request = build_add_torrent_request(&contents, rpc_secret)?;
+    let body = send_rpc_request(endpoint, &request)?;
+    let response = parse_rpc_response(&body)?;
+    let result = response.into_result("ariawatch-1")?;
+
+    expect_gid(result, "aria2.addTorrent")
+}
+
+// this does the validation part of the GID that is provided to ariawatch
+// NOTE: this function validtes gid that is *provided to ariawatch* while the previous function
+// validated the GID that was *returned by aria2*
+fn validate_gid(gid: &str) -> Result<(), String> {
+    if gid.len() != 16 || !gid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(String::from("Invalid aria2 GID"));
+    }
+
+    Ok(())
+}
+
+// tthis is the helper function for the functions taht target one single download by GID
+fn run_gid_action(
+    endpoint: &str,
+    method: &str,
+    gid: &str,
+    rpc_secret: Option<&str>,
+) -> Result<(), String> {
+    validate_gid(gid)?;
+
+    let result = call_rpc_method(endpoint, method, vec![serde_json::json!(gid)], rpc_secret)?;
+
+    match result.as_str() {
+        Some(returned_gid) if returned_gid == gid => Ok(()),
+        _ => Err(format!("{method} returned an unexpected result")),
+    }
+}
+
+// download actions
+pub fn pause_download(endpoint: &str, gid: &str, rpc_secret: Option<&str>) -> Result<(), String> {
+    run_gid_action(endpoint, "aria2.pause", gid, rpc_secret)
+}
+
+pub fn resume_download(endpoint: &str, gid: &str, rpc_secret: Option<&str>) -> Result<(), String> {
+    run_gid_action(endpoint, "aria2.unpause", gid, rpc_secret)
+}
+
+// this one is for the functions that target all the downloads at once
+pub fn run_all_action(
+    endpoint: &str,
+    method: &str,
+    rpc_secret: Option<&str>,
+) -> Result<(), String> {
+    let result = call_rpc_method(endpoint, method, Vec::new(), rpc_secret)?;
+
+    if result.as_str() == Some("OK") {
+        Ok(())
+    } else {
+        Err(format!("{method} retuned an unexpected result"))
+    }
+}
+
+pub fn pause_all(endpoint: &str, rpc_secret: Option<&str>) -> Result<(), String> {
+    run_all_action(endpoint, "aria2.pauseAll", rpc_secret)
+}
+
+pub fn resume_all(endpoint: &str, rpc_secret: Option<&str>) -> Result<(), String> {
+    run_all_action(endpoint, "aria2.unpauseAll", rpc_secret)
 }
 
 // Ask aria2 only for fields used by the current table
@@ -269,5 +450,55 @@ impl Aria2DownloadResponse {
             source_url,
             self.error_message,
         ))
+    }
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::{build_add_torrent_request, build_add_uri_request, validate_gid};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    #[test]
+    fn builds_authenticated_magnet_request() {
+        let request =
+            build_add_uri_request("magnet:?xt=urn:btih:0123456789abcdef", Some("test-secret"))
+                .unwrap();
+
+        let value: serde_json::Value = serde_json::from_str(&request).unwrap();
+
+        assert_eq!(value["method"], "aria2.addUri");
+        assert_eq!(value["params"][0], "token:test-secret");
+        assert_eq!(
+            value["params"][1][0],
+            "magnet:?xt=urn:btih:0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn builds_base64_torrent_request() {
+        let contents = b"fake torrent contents";
+
+        let request = build_add_torrent_request(contents, Some("test-secret")).unwrap();
+
+        let value: serde_json::Value = serde_json::from_str(&request).unwrap();
+
+        assert_eq!(value["method"], "aria2.addTorrent");
+        assert_eq!(value["params"][0], "token:test-secret");
+
+        let encoded = value["params"][1].as_str().unwrap();
+        assert_eq!(BASE64.decode(encoded).unwrap(), contents);
+    }
+
+    #[test]
+    fn rejects_invalid_gids() {
+        assert!(validate_gid("short").is_err());
+        assert!(validate_gid("zzzzzzzzzzzzzzzz").is_err());
+        assert!(validate_gid("0123456789abcdef").is_ok());
+    }
+
+    #[test]
+    fn rejects_unsupported_uri_schemes() {
+        assert!(build_add_uri_request("file:///etc/passwd", None).is_err());
+        assert!(build_add_uri_request("not a URI", None).is_err());
     }
 }

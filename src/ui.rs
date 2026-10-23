@@ -1,7 +1,10 @@
 // Renders the actual UI and terminal input
-use crate::{app_state::AppState, logging, monitor::MonitorUpdate};
+use crate::{
+    app_state::AppState, backend::DownloadBackend, domain::status::Status, logging,
+    monitor::MonitorUpdate,
+};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -17,7 +20,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table},
 };
-use std::{io, sync::mpsc::Receiver, time::Duration};
+use std::{io, path::Path, sync::mpsc::Receiver, time::Duration};
 
 // this is for the choice of how to exit the applciation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +99,57 @@ fn draw_exit_dialog(frame: &mut Frame<'_>, selected: usize) {
     frame.render_widget(dialog, area);
 }
 
+// this draws the add download dialog
+fn draw_add_dialog(frame: &mut Frame<'_>, input: &str) {
+    let area = centered_rect(65, 25, frame.area());
+    frame.render_widget(Clear, area);
+
+    let dialog = Paragraph::new(vec![
+        Line::from("URL, magnet URI, or local .torrent path"),
+        Line::from(""),
+        Line::from(format!("> {input}_")),
+        Line::from(""),
+        Line::from("Enter: add    Esc: cancel"),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Add Download ")
+            .title_alignment(Alignment::Center),
+    );
+
+    frame.render_widget(dialog, area);
+}
+
+// checks if input is a URI or not
+fn input_is_uri(input: &str) -> bool {
+    let lower = input.to_ascii_lowercase();
+
+    [
+        "http://", "https://", "ftp://", "ftps://", "sftp://", "magnet:?",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
+}
+
+// just a kind of messenger that takes the result of something, and has two states - one is the
+// success statement and another is the action statement,,, basically like this happened - this is
+// supposed to happen
+fn operation_feedback(
+    result: Result<(), String>,
+    success_message: &str,
+    action_name: &str,
+) -> String {
+    match result {
+        Ok(()) => success_message.to_owned(),
+        Err(error) => {
+            logging::error(&format!("{action_name} failed: {error}"));
+            format!("{action_name} failed; see logs")
+        }
+    }
+}
+
 // just formats the size by like B, KiB, MiB, and such
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -145,6 +199,7 @@ pub fn draw(
     managed_mode: bool,
     show_exit_dialog: bool,
     selected_exit_option: usize,
+    add_input: Option<&str>,
 ) {
     // 4 sections for the TUI
     let sections = Layout::default()
@@ -312,9 +367,9 @@ pub fn draw(
     // Footer content
 
     let exit_hint = if managed_mode {
-        "q: exit options"
+        "a:add p:pause r:resume P/R:all q: exit options"
     } else {
-        "q: quit"
+        "a:add p:pause r:resume P/R:all q: quit"
     };
 
     let footer = Paragraph::new(format!(
@@ -328,6 +383,10 @@ pub fn draw(
     if show_exit_dialog {
         draw_exit_dialog(frame, selected_exit_option);
     }
+
+    if let Some(input) = add_input {
+        draw_add_dialog(frame, input);
+    }
 }
 
 // Function to ope nthe terminal dashboard nad handle keyboard input
@@ -335,6 +394,7 @@ pub fn run(
     mut state: AppState,
     updates: Receiver<MonitorUpdate>,
     managed_mode: bool,
+    back: &dyn DownloadBackend,
 ) -> Result<ExitChoice, String> {
     enable_raw_mode().map_err(|error| format!("Could not enable raw mode: {error}"))?;
 
@@ -357,7 +417,7 @@ pub fn run(
         }
     };
 
-    let app_result = event_loop(&mut terminal, &mut state, &updates, managed_mode);
+    let app_result = event_loop(&mut terminal, &mut state, &updates, managed_mode, back);
 
     let cursor_result = terminal
         .show_cursor()
@@ -383,11 +443,13 @@ fn event_loop(
     state: &mut AppState,
     updates: &Receiver<MonitorUpdate>,
     managed_mode: bool,
+    backend: &dyn DownloadBackend,
 ) -> Result<ExitChoice, String> {
     let mut status_message = "Starting live monitor".to_owned();
     let mut redraw_needed = true;
     let mut show_exit_dialog = false;
     let mut selected_exit_option = 0_usize;
+    let mut add_input: Option<String> = None;
 
     loop {
         for update in updates.try_iter() {
@@ -428,6 +490,7 @@ fn event_loop(
                         managed_mode,
                         show_exit_dialog,
                         selected_exit_option,
+                        add_input.as_deref(),
                     )
                 })
                 .map_err(|error| format!("Could not draw dashboard: {error}"))?;
@@ -444,7 +507,62 @@ fn event_loop(
             match event {
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Press {
-                        if show_exit_dialog {
+                        if add_input.is_some() {
+                            match key.code {
+                                KeyCode::Enter => {
+                                    let value =
+                                        add_input.as_deref().unwrap_or_default().trim().to_owned();
+
+                                    if value.is_empty() {
+                                        status_message =
+                                            "Enter a URL, magnet URI or .torrent path".to_owned();
+                                    } else {
+                                        add_input = None;
+
+                                        let result = if input_is_uri(&value) {
+                                            backend.add_uri(&value)
+                                        } else {
+                                            backend.add_torrent_file(Path::new(&value))
+                                        };
+
+                                        status_message = match result {
+                                            Ok(gid) => format!("Added download: {gid}"),
+                                            Err(error) => {
+                                                logging::error(&format!(
+                                                    "Add download failed: {error}"
+                                                ));
+                                                String::from("Add download failed; see logs")
+                                            }
+                                        };
+                                    }
+
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Esc => {
+                                    add_input = None;
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Backspace => {
+                                    if let Some(input) = add_input.as_mut() {
+                                        input.pop();
+                                    }
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Char(character)
+                                    if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                                {
+                                    if let Some(input) = add_input.as_mut() {
+                                        input.push(character);
+                                    }
+                                    redraw_needed = true;
+                                }
+
+                                _ => {}
+                            }
+                        } else if show_exit_dialog {
                             match key.code {
                                 KeyCode::Left | KeyCode::Up => {
                                     selected_exit_option = (selected_exit_option + 2) % 3;
@@ -491,6 +609,78 @@ fn event_loop(
                                     }
                                 }
 
+                                KeyCode::Char('a') => {
+                                    add_input = Some(String::new());
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Char('p') => {
+                                    let result = match state.selected_download() {
+                                        Some(download)
+                                            if download.status.is_active()
+                                                || matches!(&download.status, Status::Waiting) =>
+                                        {
+                                            backend.pause_download(&download.gid)
+                                        }
+
+                                        Some(_) => Err(String::from(
+                                            "Selected download is not active or waiting",
+                                        )),
+
+                                        None => Err(String::from("No download selected")),
+                                    };
+
+                                    status_message = operation_feedback(
+                                        result,
+                                        "Paused selected download",
+                                        "Pause selected download",
+                                    );
+
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Char('r') => {
+                                    let result = match state.selected_download() {
+                                        Some(download)
+                                            if matches!(&download.status, Status::Paused) =>
+                                        {
+                                            backend.resume_download(&download.gid)
+                                        }
+
+                                        Some(_) => {
+                                            Err(String::from("Selected download is not paused"))
+                                        }
+
+                                        None => Err(String::from("No download selected")),
+                                    };
+
+                                    status_message = operation_feedback(
+                                        result,
+                                        "Resumed selected download",
+                                        "Resume selected download",
+                                    );
+
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Char('P') => {
+                                    status_message = operation_feedback(
+                                        backend.pause_all(),
+                                        "Paused all downloads",
+                                        "Pause all downloads",
+                                    );
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Char('R') => {
+                                    status_message = operation_feedback(
+                                        backend.resume_all(),
+                                        "Resumed all downloads",
+                                        "Resume all downloads",
+                                    );
+                                    redraw_needed = true;
+                                }
+
                                 KeyCode::Down | KeyCode::Char('j') => {
                                     state.select_next();
                                     redraw_needed = true;
@@ -509,6 +699,16 @@ fn event_loop(
 
                 Event::Resize(_, _) => {
                     redraw_needed = true;
+                }
+
+                // this is for the paste feature like if the download TUI is just chillling and you
+                // just randomly come and paste something into the TUI, which turns out to be a
+                // download link, it autoamtically captures it and adds it
+                Event::Paste(text) => {
+                    if let Some(input) = add_input.as_mut() {
+                        input.push_str(&text);
+                        redraw_needed = true;
+                    }
                 }
 
                 _ => {}
