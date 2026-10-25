@@ -404,7 +404,6 @@ pub fn draw(
     }
 
     // Footer content
-
     let exit_hint = if managed_mode {
         "a:add p:pause r:resume P/R:all x:remove X:delete+remove q: exit options"
     } else {
