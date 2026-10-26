@@ -21,6 +21,21 @@ impl AppPaths {
         )
     }
 
+    // this makes it such taht if you connect an external server to ariawatch, it gets its own
+    // daatabase now,,, thus making sure your own download history and the server managed by someone
+    // else remain separate
+    pub fn external_database_file(&self, endpoint: &str) -> PathBuf {
+        let mut hash = 0xcbf29ce484222325_u64;
+
+        for byte in endpoint.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+
+        self.data_dir
+            .join(format!("history-external-{hash:016x}.sqlite3"))
+    }
+
     // *helps* with the automatic sniffing of paths
     fn from_values(
         home: Option<PathBuf>,
@@ -372,5 +387,20 @@ mod tests {
         assert!(real_dir.is_dir());
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn external_history_paths_are_stable_and_endpoint_specific() {
+        let paths =
+            AppPaths::from_values(Some(PathBuf::from("/home/test")), None, None, None, None)
+                .unwrap();
+
+        let first = paths.external_database_file("http://localhost:6800/jsonrpc");
+        let same = paths.external_database_file("http://localhost:6800/jsonrpc");
+        let different = paths.external_database_file("http://localhost:6801/jsonrpc");
+
+        assert_eq!(first, same);
+        assert_ne!(first, different);
+        assert!(!first.to_string_lossy().contains("localhost"));
     }
 }

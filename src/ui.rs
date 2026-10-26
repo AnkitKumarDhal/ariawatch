@@ -618,20 +618,25 @@ fn event_loop(
                         .into_iter()
                         .filter(|download| !state.is_removed_gid(&download.gid))
                         .collect();
-                    let history_saved = match history.record_downloads(&downloads) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            logging::error(&format!("Could not save snapshot to history: {error}"));
-                            false
-                        }
-                    };
+
+                    let history_reconcilation = history.reconcile_snapshot(&downloads);
+
+                    if let Err(error) = &history_reconcilation {
+                        logging::error(&format!(
+                            "Could not reconcile history with snapshot: {error}"
+                        ));
+                    }
 
                     match state.replace_downloads(downloads) {
                         Ok(()) => {
-                            status_message = if history_saved {
-                                String::from("Snapshot Synchronised")
-                            } else {
-                                String::from("Snapshot synchornized; history write failed")
+                            status_message = match history_reconcilation {
+                                Ok(0) => String::from("SNapshot Synchronized"),
+                                Ok(count) => format!(
+                                    "Snapshot synched; {count} stale history item(s) marked unavailable"
+                                ),
+                                Err(_) => {
+                                    String::from("Snapshot synched; history reconcilation failed")
+                                }
                             };
                         }
                         Err(error) => {

@@ -3,6 +3,7 @@ use crate::domain::{download::Download, status::Status};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -451,6 +452,62 @@ pub fn fetch_downloads(
     parse_download_list(result)
 }
 
+const DOWNLOAD_PAGE_SIZE: i64 = 1000;
+
+// this brings paginated download fetching (it was easy to implement ngl)
+fn fetch_paged_downloads(
+    endpoint: &str,
+    rpc_secret: Option<&str>,
+    stopped: bool,
+) -> Result<Vec<Aria2DownloadResponse>, String> {
+    let kind = if stopped { "stopped" } else { "waiting" };
+    let mut offset = 0_i64;
+    let mut downloads = Vec::new();
+
+    loop {
+        let request = if stopped {
+            build_tell_stopped_request(rpc_secret, offset, DOWNLOAD_PAGE_SIZE)?
+        } else {
+            build_tell_waiting_request(rpc_secret, offset, DOWNLOAD_PAGE_SIZE)?
+        };
+
+        let page = fetch_downloads(endpoint, &request)?;
+        let page_length = page.len();
+        downloads.extend(page);
+
+        if page_length < DOWNLOAD_PAGE_SIZE as usize {
+            break;
+        }
+
+        offset = offset
+            .checked_add(DOWNLOAD_PAGE_SIZE)
+            .ok_or_else(|| format!("aria2 {kind} pagination offset overflow"))?;
+    }
+
+    Ok(downloads)
+}
+
+// this merges the paginated downloads that were fetched in chunks
+fn merge_download_pages(
+    active: Vec<Aria2DownloadResponse>,
+    waiting: Vec<Aria2DownloadResponse>,
+    stopped: Vec<Aria2DownloadResponse>,
+) -> Vec<Aria2DownloadResponse> {
+    let mut positions: HashMap<String, usize> = HashMap::new();
+    let mut downloads: Vec<Aria2DownloadResponse> = Vec::new();
+
+    for download in active.into_iter().chain(waiting).chain(stopped) {
+        if let Some(index) = positions.get(download.gid.as_str()).copied() {
+            downloads[index] = download;
+        } else {
+            positions.insert(download.gid.clone(), downloads.len());
+            downloads.push(download);
+        }
+    }
+
+    downloads
+}
+
 // Fetches all downloads for a full snapshot
 pub fn fetch_all_downloads(
     endpoint: &str,
@@ -459,19 +516,15 @@ pub fn fetch_all_downloads(
     let active_request = build_tell_active_request(rpc_secret)?;
     let active_downloads = fetch_downloads(endpoint, &active_request)?;
 
-    let waiting_request = build_tell_waiting_request(rpc_secret, 0, 1000)?;
-    let waiting_downloads = fetch_downloads(endpoint, &waiting_request)?;
-
-    let stopped_request = build_tell_stopped_request(rpc_secret, 0, 1000)?;
-    let stopped_downloads = fetch_downloads(endpoint, &stopped_request)?;
+    let waiting_downloads = fetch_paged_downloads(endpoint, rpc_secret, false)?;
+    let stopped_downloads = fetch_paged_downloads(endpoint, rpc_secret, true)?;
 
     let active_count = active_downloads.len();
     let waiting_count = waiting_downloads.len();
     let stopped_count = stopped_downloads.len();
 
-    let mut all_downloads = active_downloads;
-    all_downloads.extend(waiting_downloads);
-    all_downloads.extend(stopped_downloads);
+    let all_downloads =
+        merge_download_pages(active_downloads, waiting_downloads, stopped_downloads);
 
     Ok((active_count, waiting_count, stopped_count, all_downloads))
 }

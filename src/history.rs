@@ -2,7 +2,7 @@
 // the actual download history, so i looked into how other DMs do the same, and they also use SQLite
 use crate::domain::download::Download;
 use rusqlite::{Connection, params};
-use std::{fs, path::Path, time::Duration};
+use std::{collections::HashSet, fs, path::Path, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct HistoryEntry {
@@ -183,6 +183,63 @@ impl HistoryStore {
         transaction
             .commit()
             .map_err(|error| format!("Could not commit history transaction: {error}"))
+    }
+
+    pub fn reconcile_snapshot(&mut self, downloads: &[Download]) -> Result<usize, String> {
+        self.record_downloads(downloads)?;
+
+        let live_gids: HashSet<&str> = downloads
+            .iter()
+            .map(|download| download.gid.as_str())
+            .collect();
+
+        let candidates = {
+            let mut statement = self.connection.prepare("SELECT gid FROM download_history WHERE status IN ('Downloading', 'Queued', 'Paused')").map_err(|error| {format!("Could not prepare for history reconcilation: {error}")})?;
+
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| {
+                    format!("Could not query history reconcilation candidates: {error}")
+                })?;
+
+            rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                format!("Could not read history reconcilation candidates: {error}")
+            })?
+        };
+
+        let transaction = self.connection.transaction().map_err(|error| {
+            format!("Could not start history reconcilation transaction: {error}")
+        })?;
+
+        let mut unavailable_count = 0;
+
+        for gid in candidates {
+            if live_gids.contains(gid.as_str()) {
+                continue;
+            }
+
+            unavailable_count += transaction
+                .execute(
+                    "
+                    UPDATE download_history
+                    SET status = 'Unavailable',
+                        speed_bytes_per_second = 0,
+                        error_message = 'Not present in the current aria2 snapshot'
+                    WHERE gid = ?1
+                        AND status IN ('Downloading', 'Queued', 'Paused')
+                    ",
+                    params![gid],
+                )
+                .map_err(|error| {
+                    format!("Could not reconcile history for a missing download: {error}")
+                })?;
+        }
+
+        transaction
+            .commit()
+            .map_err(|error| format!("Could not commit history reconcilation: {error}"))?;
+
+        Ok(unavailable_count)
     }
 
     // just marks a history record as removed and records file-deletion results
@@ -376,5 +433,52 @@ mod tests {
         assert_eq!(entries[0].status, "Removed");
         assert_eq!(entries[0].deleted_files, 2);
         assert_eq!(entries[0].failed_file_deletions, 1);
+    }
+
+    #[test]
+    fn missing_live_download_becomes_unavailable() {
+        let mut history = store();
+
+        history
+            .record_downloads(&[download("file.zip", Status::Active, 100)])
+            .unwrap();
+
+        let unavailable = history.reconcile_snapshot(&[]).unwrap();
+        let entries = history.list_recent(10).unwrap();
+
+        assert_eq!(unavailable, 1);
+        assert_eq!(entries[0].status, "Unavailable");
+    }
+
+    #[test]
+    fn completed_download_is_not_marked_unavailable() {
+        let mut history = store();
+
+        history
+            .record_downloads(&[download("file.zip", Status::Complete, 1000)])
+            .unwrap();
+
+        history.reconcile_snapshot(&[]).unwrap();
+
+        let entries = history.list_recent(10).unwrap();
+        assert_eq!(entries[0].status, "Completed");
+    }
+
+    #[test]
+    fn reappearing_download_recovers_its_live_status() {
+        let mut history = store();
+
+        history
+            .record_downloads(&[download("file.zip", Status::Active, 100)])
+            .unwrap();
+
+        history.reconcile_snapshot(&[]).unwrap();
+
+        history
+            .reconcile_snapshot(&[download("file.zip", Status::Paused, 500)])
+            .unwrap();
+
+        let entries = history.list_recent(10).unwrap();
+        assert_eq!(entries[0].status, "Paused");
     }
 }

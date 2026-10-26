@@ -28,7 +28,11 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
 
     // this is the connection to the database
     let paths = AppPaths::discover()?;
-    let mut history = HistoryStore::open(&paths.database_file())?;
+    let history_path = match &config.mode {
+        RuntimeMode::Managed => paths.database_file(),
+        RuntimeMode::External(external) => paths.external_database_file(&external.rpc_url),
+    };
+    let mut history = HistoryStore::open(&history_path)?;
 
     let backend = backend::create_backend(config)?;
     let version = backend.get_version()?;
@@ -37,7 +41,13 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     logging::info(&format!("Connected to aria2 version: {version}"));
 
     let snapshot = backend.fetch_snapshot()?;
-    history.record_downloads(&snapshot.downloads)?;
+    let unavailable_count = history.reconcile_snapshot(&snapshot.downloads)?;
+
+    if unavailable_count > 0 {
+        logging::info(&format!(
+            "Marked {unavailable_count} stale history recor(s) as unavailable"
+        ));
+    }
 
     println!(
         "Fetched downloads: {} active, {} waiting, {} stopped",
