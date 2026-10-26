@@ -151,14 +151,13 @@ impl AppState {
             }
         }
 
-        if let Some(gid) = selected_gid {
-            if replacement
+        if let Some(gid) = selected_gid
+            && replacement
                 .downloads
                 .iter()
                 .any(|download| download.gid == gid)
-            {
-                replacement.selected_gid = Some(gid)
-            }
+        {
+            replacement.selected_gid = Some(gid)
         }
 
         self.downloads = replacement.downloads;

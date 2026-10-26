@@ -1,4 +1,6 @@
 // damn this file is the one dealing with sockets (this literally broke my brain)
+use super::aria2_process::ManagedAria2;
+use crate::{logging, paths::AppPaths};
 use std::{
     fs,
     io::{self, Read, Write},
@@ -7,14 +9,14 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
+    thread,
     time::Duration,
 };
-
-use crate::{logging, paths::AppPaths};
 
 // this limits commands from going larger than 32 bytes
 const MAX_COMMAND_LENGTH: usize = 32;
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(2);
+const CONTROLLER_POLL_TERMINAL: Duration = Duration::from_millis(100);
 
 // this is everything that a server needs to manage its socket (i read that somewhere, i forgor)
 struct BoundSocket {
@@ -129,25 +131,55 @@ fn remove_stale_socket(path: &Path) -> Result<(), String> {
 }
 
 // this is the actual main function of this part,,, the actual server loop
-pub fn run(paths: &AppPaths) -> Result<(), String> {
+// NOTE now that this function is updated, it still does the same thing, but it also checks up on
+// the controller process periodically too
+pub fn run(paths: &AppPaths, aria2: &mut ManagedAria2) -> Result<(), String> {
     let socket = BoundSocket::bind(&paths.controller_socket_file())?;
+
+    socket
+        .listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("Could not configure controller socket: {error}"))?;
+
     logging::info("Controller IPC socket is ready");
 
+    let mut stop_requested = false;
+
     loop {
+        if !aria2.is_running()? {
+            break;
+        }
         match socket.listener.accept() {
             Ok((stream, _address)) => match handle_connection(stream) {
-                Ok(true) => break,
+                Ok(true) => {
+                    stop_requested = true;
+                    break;
+                }
                 Ok(false) => {}
-                Err(error) => logging::warn(&format!("IPC request failed: {error}")),
+                Err(error) => {
+                    logging::warn(&format!("IPC request failed: {error}"));
+                }
             },
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                continue;
+            }
+
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(CONTROLLER_POLL_TERMINAL);
+            }
+
             Err(error) => {
-                return Err(format!("Controller socket accpet failed: {error}"));
+                return Err(format!("Controller socket accept failed: {error}"));
             }
         }
     }
 
-    logging::info("Controller IPC shutdown requested");
+    if stop_requested {
+        logging::info("Controller IPC shutdown requested");
+    } else {
+        logging::warn("Managed aria2c exited; controller is shutting down");
+    }
+
     Ok(())
 }
 

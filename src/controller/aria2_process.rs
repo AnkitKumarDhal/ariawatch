@@ -163,6 +163,21 @@ impl ManagedAria2 {
         }
     }
 
+    // checks if the managed aria2c is running or not
+    pub(super) fn is_running(&mut self) -> Result<bool, String> {
+        match self.child.try_wait() {
+            Ok(None) => Ok(true),
+            Ok(Some(status)) => {
+                self.stopped = true;
+
+                logging::error(&format!("Managed aria2c exited unexpectedly: {status}"));
+
+                Ok(false)
+            }
+            Err(error) => Err(format!("Could not inspect managed aria2c process: {error}")),
+        }
+    }
+
     // finally using the semaphore, mutex and all that shi i learn int OS
     fn shutdown_process(&mut self) {
         if self.stopped {
@@ -376,10 +391,11 @@ fn write_secret_atomically(path: &Path, value: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RpcSecretFile, generate_secret};
+    use super::{ManagedAria2, RpcSecretFile, generate_secret};
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
+        process::Command,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -420,6 +436,44 @@ mod tests {
         drop(secret);
 
         assert!(!path.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detects_when_managed_aria2_has_exited() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let root = std::env::temp_dir().join(format!(
+            "ariawatch-dead-child-test-{}-{unique_id}",
+            std::process::id()
+        ));
+
+        fs::create_dir(&root).unwrap();
+
+        // Create a child that has already exited.
+        let mut child = Command::new("sh").arg("-c").arg("exit 7").spawn().unwrap();
+
+        let status = child.wait().unwrap();
+        assert!(!status.success());
+
+        // The secret path is deliberately absent in this test.
+        let mut managed = ManagedAria2 {
+            child,
+            rpc_secret: String::new(),
+            _secret_file: RpcSecretFile {
+                path: root.join("aria2-rpc.secret"),
+                value: String::new(),
+            },
+            stopped: false,
+        };
+
+        assert!(!managed.is_running().unwrap());
+        assert!(managed.stopped);
+
+        drop(managed);
         fs::remove_dir_all(root).unwrap();
     }
 }
