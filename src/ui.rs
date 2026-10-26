@@ -1,6 +1,10 @@
 // Renders the actual UI and terminal input
 use crate::{
-    app_state::AppState, backend::DownloadBackend, domain::status::Status, logging,
+    app_state::AppState,
+    backend::DownloadBackend,
+    domain::status::Status,
+    history::{HistoryEntry, HistoryStore},
+    logging,
     monitor::MonitorUpdate,
 };
 use crossterm::{
@@ -27,6 +31,15 @@ use std::{io, path::Path, sync::mpsc::Receiver, time::Duration};
 pub enum ExitChoice {
     LeaveRunning,
     StopController,
+}
+
+// this is the struct that stores the details of the download that was requested to be removed
+#[derive(Debug, Clone)]
+struct PendingRemoval {
+    gid: String,
+    name: String,
+    status: Status,
+    delete_files: bool,
 }
 
 // layout of the central box that shows the quit options
@@ -160,6 +173,92 @@ fn draw_remove_dialog(frame: &mut Frame<'_>, download_name: Option<&str>, delete
     frame.render_widget(dialog, area);
 }
 
+// draws the history dialogbox
+fn draw_history_dialog(frame: &mut Frame<'_>, entries: &[HistoryEntry], selected_index: usize) {
+    let area = centered_rect(86, 76, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Download History ({})", entries.len()))
+        .title_alignment(Alignment::Center);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+
+    if entries.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No download history yet.").alignment(Alignment::Center),
+            sections[0],
+        );
+    } else {
+        let visible_rows = (sections[0].height.saturating_sub(1).max(1)) as usize;
+        let start = selected_index
+            .saturating_add(1)
+            .saturating_sub(visible_rows);
+
+        let rows = entries
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(visible_rows)
+            .map(|(index, entry)| {
+                let file_summary = if entry.failed_file_deletions > 0 {
+                    format!(
+                        "{} deleted / {} failed",
+                        entry.deleted_files, entry.failed_file_deletions
+                    )
+                } else if entry.deleted_files > 0 {
+                    format!("{} deleted", entry.deleted_files)
+                } else {
+                    String::from("-")
+                };
+
+                let row = Row::new(vec![
+                    Cell::from(entry.id.to_string()),
+                    Cell::from(entry.name.as_str()),
+                    Cell::from(entry.status.as_str()),
+                    Cell::from(entry.last_seen_at.as_str()),
+                    Cell::from(file_summary),
+                ]);
+
+                if index == selected_index {
+                    row.style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+                } else {
+                    row
+                }
+            });
+
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Percentage(7),
+                Constraint::Percentage(33),
+                Constraint::Percentage(15),
+                Constraint::Percentage(25),
+                Constraint::Percentage(20),
+            ],
+        )
+        .header(
+            Row::new(["ID", "Name", "Status", "Last Seen", "File Deletion"])
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        );
+
+        frame.render_widget(table, sections[0]);
+    }
+
+    frame.render_widget(
+        Paragraph::new("↑/↓ or j/k: navigate  ·  r: refresh  ·  h/Esc: close")
+            .alignment(Alignment::Center),
+        sections[1],
+    );
+}
+
 // checks if input is a URI or not
 fn input_is_uri(input: &str) -> bool {
     let lower = input.to_ascii_lowercase();
@@ -230,7 +329,7 @@ fn format_duration(seconds: Option<u64>) -> String {
 }
 
 // public function to draw the TUI
-pub fn draw(
+fn draw(
     frame: &mut Frame<'_>,
     state: &AppState,
     status_message: &str,
@@ -238,7 +337,9 @@ pub fn draw(
     show_exit_dialog: bool,
     selected_exit_option: usize,
     add_input: Option<&str>,
-    pending_removal: Option<bool>,
+    pending_removal: Option<&PendingRemoval>,
+    history_entries: Option<&[HistoryEntry]>,
+    history_selection: usize,
 ) {
     // 4 sections for the TUI
     let sections = Layout::default()
@@ -405,9 +506,9 @@ pub fn draw(
 
     // Footer content
     let exit_hint = if managed_mode {
-        "a:add p:pause r:resume P/R:all x:remove X:delete+remove q: exit options"
+        "a:add h:history p:pause r:resume P/R:all x:remove X:delete+remove q: exit options"
     } else {
-        "a:add p:pause r:resume P/R:all x:remove X:managed only q: quit"
+        "a:add h:history p:pause r:resume P/R:all x:remove X:managed only q: quit"
     };
 
     let footer = Paragraph::new(format!(
@@ -426,14 +527,12 @@ pub fn draw(
         draw_add_dialog(frame, input);
     }
 
-    if let Some(delete_files) = pending_removal {
-        draw_remove_dialog(
-            frame,
-            state
-                .selected_download()
-                .map(|download| download.name.as_str()),
-            delete_files,
-        );
+    if let Some(pending) = pending_removal {
+        draw_remove_dialog(frame, Some(&pending.name), pending.delete_files);
+    }
+
+    if let Some(entries) = history_entries {
+        draw_history_dialog(frame, entries, history_selection);
     }
 }
 
@@ -443,6 +542,7 @@ pub fn run(
     updates: Receiver<MonitorUpdate>,
     managed_mode: bool,
     back: &dyn DownloadBackend,
+    history: &mut HistoryStore,
 ) -> Result<ExitChoice, String> {
     enable_raw_mode().map_err(|error| format!("Could not enable raw mode: {error}"))?;
 
@@ -465,7 +565,14 @@ pub fn run(
         }
     };
 
-    let app_result = event_loop(&mut terminal, &mut state, &updates, managed_mode, back);
+    let app_result = event_loop(
+        &mut terminal,
+        &mut state,
+        &updates,
+        managed_mode,
+        back,
+        history,
+    );
 
     let cursor_result = terminal
         .show_cursor()
@@ -492,28 +599,59 @@ fn event_loop(
     updates: &Receiver<MonitorUpdate>,
     managed_mode: bool,
     backend: &dyn DownloadBackend,
+    history: &mut HistoryStore,
 ) -> Result<ExitChoice, String> {
     let mut status_message = "Starting live monitor".to_owned();
     let mut redraw_needed = true;
     let mut show_exit_dialog = false;
     let mut selected_exit_option = 0_usize;
     let mut add_input: Option<String> = None;
-    let mut pending_removal: Option<bool> = None;
+    let mut pending_removal: Option<PendingRemoval> = None;
+    let mut history_view: Option<Vec<HistoryEntry>> = None;
+    let mut history_selection = 0usize;
 
     loop {
         for update in updates.try_iter() {
             match update {
-                MonitorUpdate::Snapshot(downloads) => match state.replace_downloads(downloads) {
-                    Ok(()) => {
-                        status_message = "Snapshot Synchronized".to_owned();
+                MonitorUpdate::Snapshot(downloads) => {
+                    let downloads: Vec<_> = downloads
+                        .into_iter()
+                        .filter(|download| !state.is_removed_gid(&download.gid))
+                        .collect();
+                    let history_saved = match history.record_downloads(&downloads) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            logging::error(&format!("Could not save snapshot to history: {error}"));
+                            false
+                        }
+                    };
+
+                    match state.replace_downloads(downloads) {
+                        Ok(()) => {
+                            status_message = if history_saved {
+                                String::from("Snapshot Synchronised")
+                            } else {
+                                String::from("Snapshot synchornized; history write failed")
+                            };
+                        }
+                        Err(error) => {
+                            logging::error(&format!("Snapshot rejected: {error}"));
+                            status_message = String::from("Snapshot rejected; see log")
+                        }
                     }
-                    Err(error) => {
-                        logging::error(&format!("Snapshot rejected: {error}"));
-                        status_message = "Snapshot rejected; see log".to_owned();
-                    }
-                },
+                }
 
                 MonitorUpdate::Progress(downloads) => {
+                    let downloads: Vec<_> = downloads
+                        .into_iter()
+                        .filter(|download| !state.is_removed_gid(&download.gid))
+                        .collect();
+
+                    if let Err(error) = history.record_downloads(&downloads) {
+                        logging::error(&format!("Could nto save progress to history: {error}"));
+                        status_message = String::from("History update failed; see logs")
+                    }
+
                     for download in downloads {
                         state.upsert_download(download);
                     }
@@ -540,7 +678,9 @@ fn event_loop(
                         show_exit_dialog,
                         selected_exit_option,
                         add_input.as_deref(),
-                        pending_removal,
+                        pending_removal.as_ref(),
+                        history_view.as_deref(),
+                        history_selection,
                     )
                 })
                 .map_err(|error| format!("Could not draw dashboard: {error}"))?;
@@ -557,50 +697,66 @@ fn event_loop(
             match event {
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Press {
-                        if let Some(delete_files) = pending_removal {
+                        if let Some(pending) = pending_removal.clone() {
                             match key.code {
                                 KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                                    let action_result = state.selected_download().map(|download| {
-                                        let gid = download.gid.clone();
+                                    let removal_result: Result<(String, usize, usize), String> =
+                                        if pending.delete_files {
+                                            backend.remove_download_and_delete_files(&pending.gid, &pending.status).map(|report| {
+                                            let message = if report.failed_files == 0 {
+                                                format!("Removed download; deleted {} file(s)", report.deleted_files)
+                                            } else {
+                                                format!("Removed download; {} file deletion(s) failed (see logs)", report.failed_files)
+                                            };
 
-                                        let result: Result<String, String> = if delete_files {
-                                            backend.remove_download_and_delete_files(&gid, &download.status).map(|report| {
-                                                if report.failed_files == 0 {
-                                                    format!("Removed download; deleted {} file(s)", report.deleted_files)
-                                                } else {
-                                                    format!("Removed download; {} file deletion(s) failed (see log)", report.failed_files)
-                                                }
-                                            })
+                                            (message, report.deleted_files, report.failed_files)
+                                        })
                                         } else {
-                                            backend.remove_download(&gid, &download.status).map(|()| String::from("Removed download; files kept"))
+                                            backend
+                                                .remove_download(&pending.gid, &pending.status)
+                                                .map(|()| {
+                                                    (
+                                                        String::from(
+                                                            "Removed download; files kept",
+                                                        ),
+                                                        0,
+                                                        0,
+                                                    )
+                                                })
                                         };
 
-                                        (gid, result)
-                                    });
+                                    match removal_result {
+                                        Ok((message, deleted_files, failed_file_deletions)) => {
+                                            if let Err(error) = state.remove_download(&pending.gid)
+                                            {
+                                                logging::error(&format!(
+                                                    "aria2 removal succeeded but local state update failed: {error}"
+                                                ));
+                                            }
 
-                                    match action_result {
-                                        Some((gid, Ok(message))) => {
-                                            match state.remove_download(&gid) {
+                                            match history.mark_removed(
+                                                &pending.gid,
+                                                deleted_files,
+                                                failed_file_deletions,
+                                            ) {
                                                 Ok(()) => status_message = message,
                                                 Err(error) => {
                                                     logging::error(&format!(
-                                                        "aria2 removal succeeded but local state update failed: {error}"
+                                                        "Download was removed but history update failed: {error}"
                                                     ));
-                                                    status_message = message;
+                                                    status_message = String::from(
+                                                        "Removed from aria2; history update failed",
+                                                    );
                                                 }
                                             }
                                         }
 
-                                        Some((_, Err(error))) => {
+                                        Err(error) => {
                                             logging::error(&format!(
                                                 "Download removal failed: {error}"
                                             ));
                                             status_message =
                                                 String::from("Removal failed; see logs");
-                                        }
-
-                                        None => {
-                                            status_message = String::from("No download selected")
                                         }
                                     }
 
@@ -611,6 +767,53 @@ fn event_loop(
                                 KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                                     pending_removal = None;
                                     status_message = String::from("Removal cancelled");
+                                    redraw_needed = true;
+                                }
+
+                                _ => {}
+                            }
+                        } else if history_view.is_some() {
+                            match key.code {
+                                KeyCode::Esc | KeyCode::Char('h') => {
+                                    history_view = None;
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    history_selection = history_selection.saturating_sub(1);
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    let count = history_view
+                                        .as_ref()
+                                        .map(|entries| entries.len())
+                                        .unwrap_or(0);
+
+                                    if count > 0 {
+                                        history_selection = (history_selection + 1).min(count - 1);
+                                    }
+
+                                    redraw_needed = true;
+                                }
+
+                                KeyCode::Char('r') => {
+                                    match history.list_recent(100) {
+                                        Ok(entries) => {
+                                            history_selection = history_selection
+                                                .min(entries.len().saturating_sub(1));
+                                            history_view = Some(entries);
+                                            status_message = String::from("History refreshed");
+                                        }
+                                        Err(error) => {
+                                            logging::error(&format!(
+                                                "Could not refresh history: {error}"
+                                            ));
+                                            status_message =
+                                                String::from("Could not refresh history; see logs");
+                                        }
+                                    }
+
                                     redraw_needed = true;
                                 }
 
@@ -791,8 +994,13 @@ fn event_loop(
                                 }
 
                                 KeyCode::Char('x') => {
-                                    if state.selected_download().is_some() {
-                                        pending_removal = Some(false)
+                                    if let Some(download) = state.selected_download() {
+                                        pending_removal = Some(PendingRemoval {
+                                            gid: download.gid.clone(),
+                                            name: download.name.clone(),
+                                            status: download.status,
+                                            delete_files: false,
+                                        });
                                     } else {
                                         status_message = String::from("No download selected")
                                     }
@@ -805,13 +1013,36 @@ fn event_loop(
                                         status_message = String::from(
                                             "Deleting files is only available in managed mode",
                                         )
-                                    } else if state.selected_download().is_some() {
-                                        pending_removal = Some(true)
+                                    } else if let Some(download) = state.selected_download() {
+                                        pending_removal = Some(PendingRemoval {
+                                            gid: download.gid.clone(),
+                                            name: download.name.clone(),
+                                            status: download.status,
+                                            delete_files: true,
+                                        })
                                     } else {
                                         status_message = String::from("No download selected")
                                     }
 
                                     redraw_needed = true
+                                }
+
+                                KeyCode::Char('h') => {
+                                    match history.list_recent(100) {
+                                        Ok(entries) => {
+                                            history_view = Some(entries);
+                                            history_selection = 0;
+                                        }
+                                        Err(error) => {
+                                            logging::error(&format!(
+                                                "Could not load history: {error}"
+                                            ));
+                                            status_message =
+                                                String::from("Counld not load history; see logs");
+                                        }
+                                    }
+
+                                    redraw_needed = true;
                                 }
 
                                 KeyCode::Down | KeyCode::Char('j') => {

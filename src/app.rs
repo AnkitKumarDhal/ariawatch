@@ -3,7 +3,9 @@ use crate::{
     app_state::AppState,
     backend,
     config::{RuntimeConfig, RuntimeMode},
-    controller, logging,
+    controller,
+    history::HistoryStore,
+    logging,
     paths::AppPaths,
     ui,
 };
@@ -24,6 +26,10 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
 
     let managed_mode = matches!(&config.mode, RuntimeMode::Managed);
 
+    // this is the connection to the database
+    let paths = AppPaths::discover()?;
+    let mut history = HistoryStore::open(&paths.database_file())?;
+
     let backend = backend::create_backend(config)?;
     let version = backend.get_version()?;
 
@@ -31,6 +37,7 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     logging::info(&format!("Connected to aria2 version: {version}"));
 
     let snapshot = backend.fetch_snapshot()?;
+    history.record_downloads(&snapshot.downloads)?;
 
     println!(
         "Fetched downloads: {} active, {} waiting, {} stopped",
@@ -53,9 +60,8 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     println!("Tracked downloads: {}", state.download_count());
 
     let updates = backend.start_monitor(state.active_gids())?;
-    let exit_choice = ui::run(state, updates, managed_mode, backend.as_ref())?;
+    let exit_choice = ui::run(state, updates, managed_mode, backend.as_ref(), &mut history)?;
     if exit_choice == ui::ExitChoice::StopController {
-        let paths = AppPaths::discover()?;
         controller::stop(&paths)?;
     }
 

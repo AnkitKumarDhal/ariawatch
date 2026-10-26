@@ -1,7 +1,7 @@
 // This file, defines aria2 download statusses
 
 // aria2 download states
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Active,
     Waiting,

@@ -1,10 +1,12 @@
 // Manages download state for the application
 use crate::domain::download::Download;
+use std::collections::HashSet;
 
 // In-memory collection of downloads, tracked by AriaWatch
 pub struct AppState {
     downloads: Vec<Download>,
     selected_gid: Option<String>,
+    removed_gids: HashSet<String>,
 }
 
 impl AppState {
@@ -12,6 +14,7 @@ impl AppState {
         Self {
             downloads: Vec::new(),
             selected_gid: None,
+            removed_gids: HashSet::new(),
         }
     }
 
@@ -89,6 +92,8 @@ impl AppState {
     }
 
     pub fn remove_download(&mut self, gid: &str) -> Result<(), String> {
+        self.removed_gids.insert(gid.to_owned());
+
         let index = self
             .downloads
             .iter()
@@ -113,6 +118,10 @@ impl AppState {
 
     // Updates existing download or tracks a new one
     pub fn upsert_download(&mut self, download: Download) {
+        if self.is_removed_gid(&download.gid) {
+            return;
+        }
+
         let gid = download.gid.clone();
 
         if let Some(existing) = self
@@ -134,9 +143,12 @@ impl AppState {
     pub fn replace_downloads(&mut self, downloads: Vec<Download>) -> Result<(), String> {
         let selected_gid = self.selected_gid.clone();
         let mut replacement = Self::new();
+        replacement.removed_gids = self.removed_gids.clone();
 
         for download in downloads {
-            replacement.add_download(download)?;
+            if !replacement.is_removed_gid(&download.gid) {
+                replacement.add_download(download)?;
+            }
         }
 
         if let Some(gid) = selected_gid {
@@ -178,6 +190,11 @@ impl AppState {
     pub fn downloads(&self) -> &[Download] {
         &self.downloads
     }
+
+    // tracks if the gid of a record is in the removed-gids hashset
+    pub fn is_removed_gid(&self, gid: &str) -> bool {
+        self.removed_gids.contains(gid)
+    }
 }
 
 #[cfg(test)]
@@ -206,6 +223,19 @@ mod tests {
         state.add_download(make_download("a", "first.zip")).unwrap();
 
         assert_eq!(state.selected_gid(), Some("a"));
+    }
+
+    #[test]
+    fn late_update_does_not_reintroduce_removed_download() {
+        let mut state = AppState::new();
+
+        state.add_download(make_download("a", "first.zip")).unwrap();
+        state.remove_download("a").unwrap();
+
+        state.upsert_download(make_download("a", "first-updated.zip"));
+
+        assert_eq!(state.download_count(), 0);
+        assert_eq!(state.selected_gid(), None);
     }
 
     #[test]

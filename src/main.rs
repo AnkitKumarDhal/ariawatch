@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod controller;
 mod domain;
+mod history;
 mod logging;
 mod monitor;
 mod paths;
