@@ -3,7 +3,7 @@ use clap::Parser;
 #[derive(Debug, Parser)]
 #[command(
     name = "ariawatch",
-    about = "A TUI based download manager powered by aria2"
+    about = "An aria2 based download manager in the terminal"
 )]
 pub struct Cli {
     #[arg(long)]
