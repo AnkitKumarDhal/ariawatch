@@ -10,6 +10,10 @@ use crate::{
     ui,
 };
 
+fn should_stop_controller(managed_mode: bool, exit_choice: ui::ExitChoice) -> bool {
+    managed_mode && exit_choice == ui::ExitChoice::StopController
+}
+
 // Connectst o aria2 and starts the monitor and TUI
 // FINALLY its smaller now lol
 pub fn run(config: RuntimeConfig) -> Result<(), String> {
@@ -76,9 +80,29 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
 
     let updates = backend.start_monitor(state.active_gids())?;
     let exit_choice = ui::run(state, updates, managed_mode, backend.as_ref(), &mut history)?;
-    if exit_choice == ui::ExitChoice::StopController {
+    if should_stop_controller(managed_mode, exit_choice) {
         controller::stop(&paths)?;
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_stop_controller;
+    use crate::ui::ExitChoice;
+
+    #[test]
+    fn managed_mode_stops_controller_only_when_requested() {
+        assert!(should_stop_controller(true, ExitChoice::StopController));
+
+        assert!(!should_stop_controller(true, ExitChoice::LeaveRunning));
+    }
+
+    #[test]
+    fn external_mode_never_stops_controller() {
+        assert!(!should_stop_controller(false, ExitChoice::StopController));
+
+        assert!(!should_stop_controller(false, ExitChoice::LeaveRunning));
+    }
 }
