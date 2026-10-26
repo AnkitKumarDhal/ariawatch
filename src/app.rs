@@ -41,12 +41,17 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     logging::info(&format!("Connected to aria2 version: {version}"));
 
     let snapshot = backend.fetch_snapshot()?;
-    let unavailable_count = history.reconcile_snapshot(&snapshot.downloads)?;
 
-    if unavailable_count > 0 {
-        logging::info(&format!(
-            "Marked {unavailable_count} stale history recor(s) as unavailable"
-        ));
+    if snapshot.is_complete {
+        let unavailable_count = history.reconcile_snapshot(&snapshot.downloads)?;
+        if unavailable_count > 0 {
+            logging::info(&format!(
+                "Marked {unavailable_count} stale history record(s) as unavailable"
+            ));
+        }
+    } else {
+        history.record_downloads(&snapshot.downloads)?;
+        logging::warn("Initial aria2 snapshot was incomplete; history reconcilation was skipped");
     }
 
     println!(
