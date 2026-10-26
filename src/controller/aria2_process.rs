@@ -56,9 +56,11 @@ impl ManagedAria2 {
         let secret_file = RpcSecretFile::create(&paths.rpc_secret_file(), &rpc_secret)?;
 
         // YOU SEE THIS??? THIS GRINDED MY BRAIN SO BAD
+        // update: just added another integrity feature with the stop-with-process arg
         let child = Command::new("aria2c")
             .arg("--no-conf=true")
             .arg("--daemon=false")
+            .arg(format!("--stop-with-process={}", std::process::id()))
             .arg("--enable-rpc=true")
             .arg("--rpc-listen-all=false")
             .arg("--rpc-listen-port=6800")
@@ -391,10 +393,10 @@ fn write_secret_atomically(path: &Path, value: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ManagedAria2, RpcSecretFile, generate_secret};
+    use super::{ManagedAria2, RpcSecretFile, generate_secret, prepare_session_file};
     use std::{
         fs,
-        os::unix::fs::PermissionsExt,
+        os::unix::fs::{PermissionsExt, symlink},
         process::Command,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -474,6 +476,64 @@ mod tests {
         assert!(managed.stopped);
 
         drop(managed);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn session_file_is_preserved_and_secured() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let root = std::env::temp_dir().join(format!(
+            "ariawatch-session-test-{}-{unique_id}",
+            std::process::id()
+        ));
+
+        fs::create_dir(&root).unwrap();
+
+        let path = root.join("aria2.session");
+        let contents = "https://example.invalid/archive.zip\n";
+
+        fs::write(&path, contents).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        prepare_session_file(&path).unwrap();
+
+        // Preparing the session file must not erase saved download entries.
+        assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+
+        // The session file must only be accessible to its owner.
+        let permissions = fs::metadata(&path).unwrap().permissions();
+        assert_eq!(permissions.mode() & 0o777, 0o600);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_session_file_symlinks_without_modifying_target() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let root = std::env::temp_dir().join(format!(
+            "ariawatch-session-symlink-test-{}-{unique_id}",
+            std::process::id()
+        ));
+
+        fs::create_dir(&root).unwrap();
+
+        let target = root.join("target");
+        let session_path = root.join("aria2.session");
+
+        fs::write(&target, "keep this content").unwrap();
+        symlink(&target, &session_path).unwrap();
+
+        assert!(prepare_session_file(&session_path).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "keep this content");
+
         fs::remove_dir_all(root).unwrap();
     }
 }
