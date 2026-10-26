@@ -28,6 +28,27 @@ It provides a keyboard-driven interface for adding downloads, monitoring progres
 
 External mode requires an already-running aria2 instance with JSON-RPC enabled. It does not need to launch or manage that instance.
 
+## Prebuilt binary — Linux x86_64
+
+The v0.3.0 release provides a prebuilt Linux x86_64 executable, so you do not need to install Rust or compile the project yourself.
+
+Download `ariawatch-v0.3.0-linux-x86_64` from the [GitHub Releases page](https://github.com/AnkitKumarDhal/ariawatch/releases).
+
+Open a terminal in the directory where you downloaded the file, then run:
+
+```bash
+chmod +x ariawatch-v0.3.0-linux-x86_64
+./ariawatch-v0.3.0-linux-x86_64
+```
+
+No installer or package manager is required.
+
+**Compatibility:** The v0.3.0 binary is built and tested on Arch Linux x86_64. It may work on other Linux distributions, but compatibility is not guaranteed. System library and ABI differences can affect whether the executable runs.
+
+**Managed mode:** `aria2c` must still be installed and available on `PATH`. AriaWatch manages the aria2 process; it does not bundle aria2 itself.
+
+This is an early binary release intended to make testing easier and gather feedback from Linux users. If the executable fails to start on your distribution, please report your distribution, architecture, and the error message.
+
 ## Build from source
 
 Clone the repository:
@@ -242,6 +263,16 @@ Check the application logs for snapshot or history errors. A malformed or incomp
 ### The controller fails to start
 
 Check the application log for controller startup errors. Confirm that `aria2c` is installed and that no conflicting process is already using the configured RPC port.
+
+### The prebuilt binary does not start
+
+Confirm that you downloaded the Linux x86_64 binary and that your distribution provides compatible system libraries. If it still fails, include the error output and your distribution details when reporting the issue.
+
+## Reporting bugs and feedback
+
+AriaWatch v0.3.0 is an early release, and real-world testing is appreciated.
+
+Please report bugs, unexpected behaviour, and feature requests through [GitHub Issues](https://github.com/AnkitKumarDhal/ariawatch/issues). Include your Linux distribution, architecture, steps to reproduce the issue, and relevant logs when possible. Do not post RPC secrets or other credentials.
 
 ## References
 
