@@ -122,25 +122,34 @@ fn rotate_if_needed(log: &mut LogFile) -> bool {
         .metadata()
         .is_ok_and(|metadata| metadata.len() >= MAX_LOG_SIZE);
 
-    if !is_full {
-        return false;
-    }
-
-    if log.file.flush().is_err() {
+    if !is_full | log.file.flush().is_err() {
         return false;
     }
 
     let backup_path = log.path.with_extension("log.1");
 
-    if fs::copy(&log.path, &backup_path).is_err() {
+    if log
+        .file
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .is_err()
+    {
         return false;
     }
 
-    if log.file.set_len(0).is_err() {
+    if fs::rename(&log.path, &backup_path).is_err() {
         return false;
     }
 
-    true
+    match open_log_file(&log.path) {
+        Ok(file) => {
+            log.file = file;
+            true
+        }
+        Err(_) => {
+            let _ = fs::rename(&backup_path, &log.path);
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -241,6 +250,60 @@ mod tests {
             "preserve this content"
         );
 
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rotation_replaces_backup_symlink_without_overwriting_target() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let directory = std::env::temp_dir().join(format!(
+            "ariawatch-log-rotation-symlink-{}-{unique_id}",
+            std::process::id()
+        ));
+
+        fs::create_dir_all(&directory).unwrap();
+
+        let path = directory.join("ariawatch.log");
+        let backup_path = path.with_extension("log.1");
+        let target = directory.join("important.txt");
+
+        fs::write(&target, "keep this file unchanged").unwrap();
+        symlink(&target, &backup_path).unwrap();
+
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+
+        file.write_all(&vec![b'x'; (MAX_LOG_SIZE + 1) as usize])
+            .unwrap();
+
+        let mut log = LogFile {
+            file,
+            path: path.clone(),
+        };
+
+        assert!(rotate_if_needed(&mut log));
+
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "keep this file unchanged"
+        );
+
+        let backup_metadata = fs::symlink_metadata(&backup_path).unwrap();
+        assert!(!backup_metadata.file_type().is_symlink());
+        assert_eq!(backup_metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(log.file.metadata().unwrap().len(), 0);
+
+        drop(log);
         fs::remove_dir_all(directory).unwrap();
     }
 }
