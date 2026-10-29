@@ -475,16 +475,14 @@ pub fn build_tell_stopped_request(
 
 // formats and returns the http_error details in a more presentable way
 fn format_http_error_detail(body: &str) -> String {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
-        if let Some(error) = value.get("error") {
-            if let (Some(code), Some(message)) = (
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
+        && let Some(error) = value.get("error")
+            && let (Some(code), Some(message)) = (
                 error.get("code").and_then(serde_json::Value::as_i64),
                 error.get("message").and_then(serde_json::Value::as_str),
             ) {
                 return format!(" (JSON-RPC error {code}: {message})");
             }
-        }
-    }
 
     let body = body.trim();
 
