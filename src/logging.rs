@@ -2,7 +2,8 @@
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::PathBuf,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -17,19 +18,54 @@ struct LogFile {
 
 static LOG_FILE: OnceLock<Mutex<LogFile>> = OnceLock::new();
 
-pub fn init() -> Result<PathBuf, String> {
-    let paths = AppPaths::discover()?;
-
-    fs::create_dir_all(&paths.state_dir)
-        .map_err(|error| format!("Could not create log directory: {error}"))?;
-
-    let log_path = paths.state_dir.join("ariawatch.log");
-
+fn open_log_file(path: &Path) -> Result<std::fs::File, String> {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log_path)
-        .map_err(|error| format!("Could not open log file: {error}"))?;
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| format!("Could not open log file {}: {error}", path.display()))?;
+
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("Could not inspect log file: {error}"))?;
+
+    if !metadata.is_file() {
+        return Err(format!(
+            "Log path is not a regular file: {}",
+            path.display()
+        ));
+    }
+
+    let current_uid = unsafe { libc::geteuid() };
+
+    if metadata.uid() != current_uid {
+        return Err(format!(
+            "Log file is not owned by current user: {}",
+            path.display()
+        ));
+    }
+
+    if metadata.nlink() != 1 {
+        return Err(format!(
+            "Log file must not have multiple hard links: {}",
+            path.display()
+        ));
+    }
+
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("Could not secure log file: {error}"))?;
+
+    Ok(file)
+}
+
+pub fn init() -> Result<PathBuf, String> {
+    let paths = AppPaths::discover()?;
+    fs::create_dir_all(&paths.state_dir)
+        .map_err(|error| format!("Could not create log directory: {error}"))?;
+    let log_path = paths.state_dir.join("ariawatch.log");
+    let file = open_log_file(&log_path)?;
 
     LOG_FILE
         .set(Mutex::new(LogFile {
@@ -149,6 +185,62 @@ mod tests {
         assert_eq!(fs::metadata(backup_path).unwrap().len(), MAX_LOG_SIZE + 1);
 
         drop(log);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creates_log_file_with_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "ariawatch-log-permissions-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        fs::create_dir_all(&directory).unwrap();
+
+        let path = directory.join("ariawatch.log");
+        let file = super::open_log_file(&path).unwrap();
+
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+
+        drop(file);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symbolic_link_as_log_file() {
+        use std::os::unix::fs::symlink;
+
+        let directory = std::env::temp_dir().join(format!(
+            "ariawatch-log-symlink-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        fs::create_dir_all(&directory).unwrap();
+
+        let target = directory.join("target");
+        let log_path = directory.join("ariawatch.log");
+
+        fs::write(&target, "preserve this content").unwrap();
+        symlink(&target, &log_path).unwrap();
+
+        assert!(super::open_log_file(&log_path).is_err());
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "preserve this content"
+        );
+
         fs::remove_dir_all(directory).unwrap();
     }
 }

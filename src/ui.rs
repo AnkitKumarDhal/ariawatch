@@ -608,9 +608,6 @@ pub fn run(
     let mut terminal = match Terminal::new(backend) {
         Ok(terminal) => terminal,
         Err(error) => {
-            let _ = disable_raw_mode();
-            let _ = execute!(io::stdout(), LeaveAlternateScreen);
-
             return Err(format!("Could not initialize terminal: {error}"));
         }
     };
