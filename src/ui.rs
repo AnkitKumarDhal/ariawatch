@@ -42,6 +42,54 @@ struct PendingRemoval {
     delete_files: bool,
 }
 
+// Restores terminal state even if the UI exits unexpectedly
+struct TerminalGuard {
+    active: bool,
+}
+
+impl TerminalGuard {
+    fn new() -> Self {
+        Self { active: true }
+    }
+
+    // this one reports cleanup errors
+    fn restore(&mut self) -> Result<(), String> {
+        let mut errors = Vec::new();
+
+        if let Err(error) = execute!(io::stdout(), crossterm::cursor::Show) {
+            errors.push(format!("Coult not restore cursor: {error}"));
+        }
+
+        if let Err(error) = execute!(io::stdout(), LeaveAlternateScreen) {
+            errors.push(format!("Couldd not leave alternate screen: {error}"));
+        }
+
+        if let Err(error) = disable_raw_mode() {
+            errors.push(format!("Could not disable raw mode: {error}"));
+        }
+
+        if errors.is_empty() {
+            self.active = false;
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+}
+
+impl Drop for TerminalGuard {
+    // this one makes the best-effort attmept if the normal cleanup path didn't finish successfully
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        let _ = execute!(io::stdout(), crossterm::cursor::Show);
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+    }
+}
+
 // layout of the central box that shows the quit options
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let vertical_padding = (100 - percent_y) / 2;
@@ -553,6 +601,8 @@ pub fn run(
         return Err(format!("Could not enter Alternate Screen: {error}"));
     }
 
+    let mut terminal_guard = TerminalGuard::new();
+
     let backend = CrosstermBackend::new(stdout);
 
     let mut terminal = match Terminal::new(backend) {
@@ -578,16 +628,11 @@ pub fn run(
         .show_cursor()
         .map_err(|error| format!("Could not restore cursor: {error}"));
 
-    let raw_mode_result =
-        disable_raw_mode().map_err(|error| format!("Could not disable raw mode: {error}"));
-
-    let screen_result = execute!(io::stdout(), LeaveAlternateScreen)
-        .map_err(|error| format!("Could not leave alternate screen: {error}"));
+    let cleanup_result = terminal_guard.restore();
 
     let exit_choice = app_result?;
     cursor_result?;
-    raw_mode_result?;
-    screen_result?;
+    cleanup_result?;
 
     Ok(exit_choice)
 }

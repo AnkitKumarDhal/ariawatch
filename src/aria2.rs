@@ -335,6 +335,51 @@ pub fn remove_download(
     }
 }
 
+// helper function to help parse the download file locations before giving it to the get_download_file_paths()
+fn parse_download_file_paths(
+    value: &serde_json::Value,
+    source: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let files = value
+        .as_array()
+        .ok_or_else(|| format!("{source} returned an invlaid file list: expected an array"))?;
+
+    if files.is_empty() {
+        return Err(format!(
+            "{source} returned an empty file list; refusing to delete files"
+        ));
+    }
+
+    let mut paths = Vec::with_capacity(files.len());
+
+    for (index, file) in files.iter().enumerate() {
+        let object = file
+            .as_object()
+            .ok_or_else(|| format!("{source} returned a non-object entry for file {index}"))?;
+        let path_value = object.get("path").ok_or_else(|| {
+            let fields = object.keys().map(|key| key.as_str()).collect::<Vec<_>>().join(", ");
+            format!("{source} returned an invalid path for file {index}: missing `path` field (available fields: {fields})")
+        })?;
+
+        let path = path_value.as_str().filter(|path| !path.trim().is_empty()).ok_or_else(|| {
+            let actual_type = match path_value {
+                serde_json::Value::Null => "null",
+                serde_json::Value::Bool(_) => "boolean",
+                serde_json::Value::Number(_) => "number",
+                serde_json::Value::String(_) => "empty or whitespace-only string",
+                serde_json::Value::Array(_) => "array",
+                serde_json::Value::Object(_) => "object"
+            };
+
+            format!("{source} returned an invalid path for the file {index}: expected a non-empty string, got {actual_type}")
+        })?;
+
+        paths.push(PathBuf::from(path));
+    }
+
+    Ok(paths)
+}
+
 // figures out the file path to be deleted
 pub fn get_download_file_paths(
     endpoint: &str,
@@ -343,32 +388,39 @@ pub fn get_download_file_paths(
 ) -> Result<Vec<PathBuf>, String> {
     validate_gid(gid)?;
 
-    let result = call_rpc_method(
+    let primary = call_rpc_method(
         endpoint,
         "aria2.getFiles",
         vec![serde_json::json!(gid)],
         rpc_secret,
-    )?;
+    )
+    .and_then(|value| parse_download_file_paths(&value, "aria2.getFiles"));
 
-    let files = result
-        .as_array()
-        .ok_or_else(|| String::from("aria2.getFiles returned an invalid file list"))?;
+    match primary {
+        Ok(paths) => Ok(paths),
+        Err(primary_error) => {
+            let fallback = call_rpc_method(
+                endpoint,
+                "aria2.tellStatus",
+                vec![serde_json::json!(gid)],
+                rpc_secret,
+            )
+            .and_then(|status| {
+                status
+                    .get("files")
+                    .cloned()
+                    .ok_or_else(|| String::from("aria2.tellStatus returned no `files` field"))
+            })
+            .and_then(|files| parse_download_file_paths(&files, "aria2.tellStatus.files"));
 
-    files
-        .iter()
-        .enumerate()
-        .map(|(index, file)| {
-            let path = file
-                .get("path")
-                .and_then(serde_json::Value::as_str)
-                .filter(|path| !path.trim().is_empty())
-                .ok_or_else(|| {
-                    format!("aria2.getFiles returned an invalid path for file {index}")
-                })?;
-
-            Ok(PathBuf::from(path))
-        })
-        .collect()
+            match fallback {
+                Ok(paths) => Ok(paths),
+                Err(fallback_error) => Err(format!(
+                    "Coult no retrieve file paths safely. aria2.getFiles failed: {primary_error}. aria2.tellStatus fallback failed: {fallback_error}"
+                )),
+            }
+        }
+    }
 }
 
 // Ask aria2 only for fields used by the current table
@@ -421,6 +473,29 @@ pub fn build_tell_stopped_request(
     )
 }
 
+// formats and returns the http_error details in a more presentable way
+fn format_http_error_detail(body: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(error) = value.get("error") {
+            if let (Some(code), Some(message)) = (
+                error.get("code").and_then(serde_json::Value::as_i64),
+                error.get("message").and_then(serde_json::Value::as_str),
+            ) {
+                return format!(" (JSON-RPC error {code}: {message})");
+            }
+        }
+    }
+
+    let body = body.trim();
+
+    if body.is_empty() {
+        String::new()
+    } else {
+        let excerpt: String = body.chars().take(512).collect();
+        format!("; response body: {excerpt}")
+    }
+}
+
 pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -432,13 +507,20 @@ pub fn send_rpc_request(endpoint: &str, request_json: &str) -> Result<String, St
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(request_json.to_owned())
         .send()
-        .map_err(|error| format!("Could not reach aria2 rpc endpoint: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("aria2 returned an HTTP error: {error}"))?;
+        .map_err(|error| format!("Could not reach aria2 rpc endpoint: {error}"))?;
 
-    response
+    let status = response.status();
+
+    let body = response
         .text()
-        .map_err(|error| format!("Could not read aria2 response: {error}"))
+        .map_err(|error| format!("Could not read aria2 response: {error}"))?;
+
+    if !status.is_success() {
+        let detail = format_http_error_detail(&body);
+        return Err(format!("aria2 returned HTTP status {status}{detail}"));
+    }
+
+    Ok(body)
 }
 
 // Fetches and parses the list of downloads returned by the RPC request
@@ -598,7 +680,10 @@ impl Aria2DownloadResponse {
 
 #[cfg(test)]
 mod control_tests {
-    use super::{build_add_torrent_request, build_add_uri_request, validate_gid};
+    use super::{
+        build_add_torrent_request, build_add_uri_request, format_http_error_detail,
+        parse_download_file_paths, validate_gid,
+    };
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     #[test]
@@ -643,5 +728,82 @@ mod control_tests {
     fn rejects_unsupported_uri_schemes() {
         assert!(build_add_uri_request("file:///etc/passwd", None).is_err());
         assert!(build_add_uri_request("not a URI", None).is_err());
+    }
+
+    #[test]
+    fn parses_file_paths_for_download_removal() {
+        let value = serde_json::json!([
+            {
+                "index": "1",
+                "path": "/home/test/Downloads/file.iso"
+            },
+            {
+                "index": "2",
+                "path": "/home/test/Downloads/subdir/file.txt"
+            }
+        ]);
+
+        let paths = parse_download_file_paths(&value, "aria2.getFiles").unwrap();
+
+        assert_eq!(
+            paths,
+            vec![
+                std::path::PathBuf::from("/home/test/Downloads/file.iso"),
+                std::path::PathBuf::from("/home/test/Downloads/subdir/file.txt"),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_empty_file_list_for_deletion() {
+        let error =
+            parse_download_file_paths(&serde_json::json!([]), "aria2.getFiles").unwrap_err();
+
+        assert!(error.contains("empty file list"));
+    }
+
+    #[test]
+    fn reports_missing_file_path_field() {
+        let error = parse_download_file_paths(
+            &serde_json::json!([
+                {"index": "1", "length": "123"}
+            ]),
+            "aria2.getFiles",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("missing `path` field"));
+        assert!(error.contains("index"));
+    }
+
+    #[test]
+    fn reports_non_string_file_paths() {
+        let error = parse_download_file_paths(
+            &serde_json::json!([
+                {"index": "1", "path": null}
+            ]),
+            "aria2.getFiles",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("expected a non-empty string"));
+        assert!(error.contains("null"));
+    }
+
+    #[test]
+    fn includes_json_rpc_error_details_in_http_diagnostics() {
+        let body = r#"{
+        "jsonrpc": "2.0",
+        "id": "ariawatch-1",
+        "error": {
+            "code": 1,
+            "message": "Invalid request"
+        }
+    }"#;
+
+        let detail = format_http_error_detail(body);
+
+        assert!(detail.contains("JSON-RPC error 1"));
+        assert!(detail.contains("Invalid request"));
     }
 }
