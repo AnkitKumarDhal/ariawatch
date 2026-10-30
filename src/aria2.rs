@@ -314,7 +314,7 @@ pub fn remove_download(
     validate_gid(gid)?;
 
     match status {
-        Status::Active | Status::Waiting | Status::Paused => {
+        Status::Active => {
             let result = call_rpc_method(
                 endpoint,
                 "aria2.remove",
@@ -327,6 +327,21 @@ pub fn remove_download(
             }
 
             remove_download_result(endpoint, gid, rpc_secret)
+        }
+
+        Status::Waiting | Status::Paused => {
+            let result = call_rpc_method(
+                endpoint,
+                "aria2.remove",
+                vec![serde_json::json!(gid)],
+                rpc_secret,
+            )?;
+
+            if result.as_str() != Some(gid) {
+                return Err(String::from("aria2.remove returned an unexpected result"));
+            }
+
+            Ok(())
         }
 
         Status::Complete | Status::Error | Status::Removed => {

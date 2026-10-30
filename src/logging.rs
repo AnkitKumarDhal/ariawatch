@@ -122,7 +122,7 @@ fn rotate_if_needed(log: &mut LogFile) -> bool {
         .metadata()
         .is_ok_and(|metadata| metadata.len() >= MAX_LOG_SIZE);
 
-    if !is_full | log.file.flush().is_err() {
+    if !is_full || log.file.flush().is_err() {
         return false;
     }
 
