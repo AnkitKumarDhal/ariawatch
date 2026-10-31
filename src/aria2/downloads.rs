@@ -5,14 +5,14 @@ use std::{collections::HashMap, path::Path};
 
 // Represents a URI associated with an aria2 file
 #[derive(Debug, Deserialize)]
-pub struct Aria2UriResponse {
+struct Aria2UriResponse {
     pub uri: String,
     pub status: String,
 }
 
 // Represents a file entry in an aria2 response
 #[derive(Debug, Deserialize)]
-pub struct Aria2FileResponse {
+struct Aria2FileResponse {
     pub path: String,
     #[serde(default)]
     pub uris: Vec<Aria2UriResponse>,
@@ -42,7 +42,7 @@ fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
         .map_err(|error| format!("Invalid string for {field_name}: {error}"))
 }
 
-pub fn parse_download_list(value: serde_json::Value) -> Result<Vec<Aria2DownloadResponse>, String> {
+fn parse_download_list(value: serde_json::Value) -> Result<Vec<Aria2DownloadResponse>, String> {
     serde_json::from_value(value).map_err(|error| format!("Invalid aria2 download list: {error}"))
 }
 
@@ -102,7 +102,7 @@ pub fn build_tell_active_request(rpc_secret: Option<&str>) -> Result<String, Str
     build_rpc_request("aria2.tellActive", vec![download_keys()], rpc_secret)
 }
 
-pub fn build_tell_waiting_request(
+fn build_tell_waiting_request(
     rpc_secret: Option<&str>,
     offset: i64,
     num: i64,
@@ -118,7 +118,7 @@ pub fn build_tell_waiting_request(
     )
 }
 
-pub fn build_tell_stopped_request(
+fn build_tell_stopped_request(
     rpc_secret: Option<&str>,
     offset: i64,
     num: i64,

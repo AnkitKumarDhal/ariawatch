@@ -368,16 +368,17 @@ mod tests {
     }
 
     fn sample_response(gid: &str, status: &str) -> Aria2DownloadResponse {
-        Aria2DownloadResponse {
-            gid: gid.to_owned(),
-            status: status.to_owned(),
-            total_length: String::from("1000"),
-            completed_length: String::from("0"),
-            download_speed: String::from("0"),
-            files: Vec::new(),
-            dir: None,
-            error_message: None,
-        }
+        serde_json::from_value(serde_json::json!({
+            "gid": gid,
+            "status": status,
+            "totalLength": "1000",
+            "completedLength": "0",
+            "downloadSpeed": "0",
+            "files": [],
+            "dir": null,
+            "errorMessage": null
+        }))
+        .expect("valid test response")
     }
 
     #[test]
