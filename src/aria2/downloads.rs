@@ -23,17 +23,17 @@ pub struct Aria2FileResponse {
 #[serde(rename_all = "camelCase")]
 pub struct Aria2DownloadResponse {
     pub gid: String,
-    pub status: String,
-    pub total_length: String,
-    pub completed_length: String,
-    pub download_speed: String,
-    pub files: Vec<Aria2FileResponse>,
+    status: String,
+    total_length: String,
+    completed_length: String,
+    download_speed: String,
+    files: Vec<Aria2FileResponse>,
 
     #[serde(default)]
-    pub dir: Option<String>,
+    dir: Option<String>,
 
     #[serde(default)]
-    pub error_message: Option<String>,
+    error_message: Option<String>,
 }
 
 fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
