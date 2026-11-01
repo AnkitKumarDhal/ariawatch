@@ -65,14 +65,18 @@ pub fn save(path: &Path, config: &UserConfig) -> Result<(), String> {
 
 // this just extracts the parent directory
 fn parent_dir(path: &Path) -> Result<&Path, String> {
-    if path.file_name().is_none() {
-        return Err(String::from("Invalid configuration file pathj"));
-    }
-
-    Ok(path
+    let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new(".")))
+        .ok_or_else(|| String::from("Config file must be inside the ariawatch config directory"))?;
+
+    if parent.file_name() != Some(std::ffi::OsStr::new("ariawatch")) {
+        return Err(String::from(
+            "Config file must be inside the ariawatch config directory",
+        ));
+    }
+
+    Ok(parent)
 }
 
 // this one creates the config directory, verifies all that shi about it (type, ownership, permissions)
@@ -456,5 +460,13 @@ mod tests {
         assert!(load_or_create(&path).is_err());
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_paths_outside_application_config_directory() {
+        use std::path::Path;
+
+        assert!(load_or_create(Path::new("config.toml")).is_err());
+        assert!(load_or_create(Path::new("/tmp/config.toml")).is_err());
     }
 }
