@@ -3,6 +3,7 @@ use crate::{backend::DownloadBackend, logging};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::Path;
 
+// checks if input is a URI or not
 fn input_is_uri(input: &str) -> bool {
     let lower = input.to_ascii_lowercase();
 

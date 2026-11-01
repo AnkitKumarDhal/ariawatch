@@ -41,6 +41,9 @@ pub(super) fn handle_key(
     None
 }
 
+// just a kind of messenger that takes the result of something, and has two states - one is the
+// success statement and another is the action statement,,, basically like this happened - this is
+// supposed to happen
 pub(super) fn operation_feedback(
     result: Result<(), String>,
     success_message: &str,

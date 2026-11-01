@@ -13,34 +13,6 @@ mod keyboard;
 mod state;
 use state::LoopState;
 
-// checks if input is a URI or not
-fn input_is_uri(input: &str) -> bool {
-    let lower = input.to_ascii_lowercase();
-
-    [
-        "http://", "https://", "ftp://", "ftps://", "sftp://", "magnet:?",
-    ]
-    .iter()
-    .any(|prefix| lower.starts_with(prefix))
-}
-
-// just a kind of messenger that takes the result of something, and has two states - one is the
-// success statement and another is the action statement,,, basically like this happened - this is
-// supposed to happen
-fn operation_feedback(
-    result: Result<(), String>,
-    success_message: &str,
-    action_name: &str,
-) -> String {
-    match result {
-        Ok(()) => success_message.to_owned(),
-        Err(error) => {
-            logging::error(&format!("{action_name} failed: {error}"));
-            format!("{action_name} failed; see logs")
-        }
-    }
-}
-
 // Handles keyboard input
 pub(super) fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
