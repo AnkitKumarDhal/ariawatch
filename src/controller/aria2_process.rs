@@ -2,7 +2,6 @@
 // setup, not just a monitor
 use crate::{aria2, logging, paths::AppPaths};
 use std::{
-    env,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},

@@ -1,3 +1,4 @@
+// this guy right here, it is the home for the user config handling
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -29,10 +30,18 @@ impl DownloadsConfig {
     // Absolute directories are preserved as they are
     pub fn resolve_directory(&self, home_dir: &Path) -> PathBuf {
         if self.directory.is_absolute() {
-            self.directory.clone()
-        } else {
-            home_dir.join(&self.directory)
+            return self.directory.clone();
         }
+
+        if self.directory == Path::new("~") {
+            return home_dir.to_path_buf();
+        }
+
+        if let Ok(relative_path) = self.directory.strip_prefix("~/") {
+            return home_dir.join(relative_path);
+        }
+
+        home_dir.join(&self.directory)
     }
 }
 
@@ -100,5 +109,38 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.downloads.directory, PathBuf::from("Documents"));
+    }
+
+    #[test]
+    fn resolves_home_directory_shorthand() {
+        let config = DownloadsConfig {
+            directory: PathBuf::from("~"),
+        };
+
+        let resolved = config.resolve_directory(&PathBuf::from("/home/test"));
+
+        assert_eq!(resolved, PathBuf::from("/home/test"));
+    }
+
+    #[test]
+    fn resolves_tilde_prefixed_download_directory() {
+        let config = DownloadsConfig {
+            directory: PathBuf::from("~/Downloads"),
+        };
+
+        let resolved = config.resolve_directory(&PathBuf::from("/home/test"));
+
+        assert_eq!(resolved, PathBuf::from("/home/test/Downloads"));
+    }
+
+    #[test]
+    fn does_not_expand_named_user_shorthand() {
+        let config = DownloadsConfig {
+            directory: PathBuf::from("~anotheruser/Downloads"),
+        };
+
+        let resolved = config.resolve_directory(&PathBuf::from("/home/test"));
+
+        assert_eq!(resolved, PathBuf::from("/home/test/~anotheruser/Downloads"));
     }
 }
