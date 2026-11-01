@@ -1,6 +1,8 @@
+# Changelog
+
 All mentionable changes in AriaWatch are written here.
 
-## [Unreleased]
+## [0.3.1] - 01-11-2026
 
 ### Fixed
 - Fixed download deletion thingy across all the different download states
