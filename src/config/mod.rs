@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+pub(crate) mod persistence;
 mod runtime;
 mod user;
 
