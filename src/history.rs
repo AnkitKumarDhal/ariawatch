@@ -381,17 +381,17 @@ mod tests {
     }
 
     fn download(name: &str, status: Status, downloaded: u64) -> Download {
-        Download::new(
-            String::from("0123456789abcdef"),
-            name.to_owned(),
-            1000,
+        Download {
+            gid: String::from("0123456789abcdef"),
+            name: name.to_owned(),
+            size: 1000,
             downloaded,
-            128,
+            speed: 128,
             status,
-            Some(String::from("/home/test/Downloads")),
-            Some(String::from("https://example.com/file.zip")),
-            None,
-        )
+            directory: Some(String::from("/home/test/Downloads")),
+            source_url: Some(String::from("https://example.com/file.zip")),
+            error_message: None,
+        }
     }
 
     #[test]

@@ -202,17 +202,17 @@ mod tests {
     use crate::domain::status::Status;
 
     fn make_download(gid: &str, name: &str) -> Download {
-        Download::new(
-            gid.to_owned(),
-            name.to_owned(),
-            1000,
-            0,
-            0,
-            Status::Waiting,
-            None,
-            None,
-            None,
-        )
+        Download {
+            gid: gid.to_owned(),
+            name: name.to_owned(),
+            size: 1000,
+            downloaded: 0,
+            speed: 0,
+            status: Status::Waiting,
+            directory: None,
+            source_url: None,
+            error_message: None,
+        }
     }
 
     #[test]

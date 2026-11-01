@@ -70,17 +70,17 @@ impl Aria2DownloadResponse {
         let download_speed = parse_u64_field("downloadSpeed", &self.download_speed)?;
         let status = Status::from_aria2(&self.status)?;
 
-        Ok(Download::new(
-            self.gid,
+        Ok(Download {
+            gid: self.gid,
             name,
-            total_length,
-            completed_length,
-            download_speed,
+            size: total_length,
+            downloaded: completed_length,
+            speed: download_speed,
             status,
-            self.dir,
+            directory: self.dir,
             source_url,
-            self.error_message,
-        ))
+            error_message: self.error_message,
+        })
     }
 }
 

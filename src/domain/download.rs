@@ -16,30 +16,6 @@ pub struct Download {
 }
 
 impl Download {
-    pub fn new(
-        gid: String,
-        name: String,
-        size: u64,
-        downloaded: u64,
-        speed: u64,
-        status: Status,
-        directory: Option<String>,
-        source_url: Option<String>,
-        error_message: Option<String>,
-    ) -> Self {
-        Self {
-            gid,
-            name,
-            size,
-            downloaded,
-            speed,
-            status,
-            directory,
-            source_url,
-            error_message,
-        }
-    }
-
     pub fn remaining_bytes(&self) -> u64 {
         self.size.saturating_sub(self.downloaded)
     }
@@ -75,81 +51,30 @@ mod tests {
     use crate::domain::status::Status;
 
     fn make_download(size: u64, downloaded: u64) -> Download {
-        Download::new(
-            String::from("test123"),
-            String::from("test-file.zip"),
+        Download {
+            gid: String::from("test123"),
+            name: String::from("test-file.zip"),
             size,
             downloaded,
-            0,
-            Status::Active,
-            None,
-            None,
-            None,
-        )
-    }
-
-    #[test]
-    fn constructor_testing() {
-        let actual = Download::new(
-            String::from("xyz098"),
-            String::from("Anything"),
-            14_000_000_000,
-            4_000_000_000,
-            8_000_000,
-            Status::Waiting,
-            None,
-            None,
-            None,
-        );
-
-        let expected = Download {
-            gid: String::from("xyz098"),
-            name: String::from("Anything"),
-            size: 14_000_000_000,
-            downloaded: 4_000_000_000,
-            speed: 8_000_000,
-            status: Status::Waiting,
+            speed: 0,
+            status: Status::Active,
             directory: None,
             source_url: None,
             error_message: None,
-        };
-
-        assert_eq!(actual, expected);
+        }
     }
 
     #[test]
     fn remaining_bytes_testing() {
-        let download = Download::new(
-            String::from("xyz098"),
-            String::from("Anything"),
-            14_000_000_000,
-            4_000_000_000,
-            8_000_000,
-            Status::Waiting,
-            None,
-            None,
-            None,
-        );
-
+        let download = make_download(14_000_000_000, 4_000_000_000);
         let actual = download.remaining_bytes();
         let expected = 10_000_000_000;
-
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn percentage_downloaded_testing() {
-        let download = Download::new(
-            String::from("xyz098"),
-            String::from("Anything"),
-            14_000_000_000,
-            4_000_000_000,
-            8_000_000,
-            Status::Waiting,
-            None,
-            None,
-            None,
-        );
+        let download = make_download(14_000_000_000, 4_000_000_000);
         let actual = download.percentage_downloaded();
         let expected = Some(28.57142857142857);
         assert_eq!(actual, expected);
