@@ -22,7 +22,6 @@ impl Default for DownloadsConfig {
     }
 }
 
-#[allow(dead_code)]
 impl DownloadsConfig {
     // Resolves the configured directory according to the user's home directory
     // in the config file, relative directories are automatically expanded to the home

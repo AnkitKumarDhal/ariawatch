@@ -2,6 +2,7 @@
 mod downloads;
 mod operations;
 mod rpc;
+mod torrents;
 pub use downloads::{
     Aria2DownloadResponse, build_tell_active_request, fetch_all_downloads, fetch_downloads,
 };
@@ -10,3 +11,4 @@ pub use operations::{
     resume_all, resume_download,
 };
 pub use rpc::{build_get_version_request, build_rpc_request, parse_rpc_response, send_rpc_request};
+pub use torrents::{TorrentFile, get_torrent_files, set_torrent_file_selection};

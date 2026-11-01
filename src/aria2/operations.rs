@@ -116,7 +116,7 @@ pub fn add_torrent_file(
 // this does the validation part of the GID that is provided to ariawatch
 // NOTE: this function validtes gid that is *provided to ariawatch* while the previous function
 // validated the GID that was *returned by aria2*
-fn validate_gid(gid: &str) -> Result<(), String> {
+pub(super) fn validate_gid(gid: &str) -> Result<(), String> {
     if gid.len() != 16 || !gid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(String::from("Invalid aria2 GID"));
     }
