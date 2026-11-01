@@ -38,7 +38,7 @@ impl ManagedAria2 {
         let session_file = paths.aria2_session_file();
         prepare_session_file(&session_file)?;
 
-        fs::create_dir_all(&download_dir).map_err(|error| {
+        fs::create_dir_all(download_dir).map_err(|error| {
             format!(
                 "Could not create download directory {}: {error}",
                 download_dir.display()
