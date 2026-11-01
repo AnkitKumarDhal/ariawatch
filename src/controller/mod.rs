@@ -2,7 +2,8 @@ mod aria2_process;
 mod ipc;
 mod launcher;
 mod lock;
-
+use crate::{config::persistence, logging, paths::AppPaths};
+pub use lock::ControllerLock;
 use std::{
     fs::{self, OpenOptions},
     io::{self, Write},
@@ -11,10 +12,6 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-
-pub use lock::ControllerLock;
-
-use crate::{logging, paths::AppPaths};
 
 pub struct ControllerInstance {
     _lock: ControllerLock,
@@ -80,6 +77,12 @@ pub fn stop(paths: &AppPaths) -> Result<(), String> {
     }
 }
 
+// this one just loads the downloads directory from the config file
+fn load_download_directory(paths: &AppPaths, home_dir: &Path) -> Result<PathBuf, String> {
+    let config = persistence::load_or_create(&paths.config_file())?;
+    Ok(config.downloads.resolve_directory(home_dir))
+}
+
 // just runs internal controller (testing)
 pub fn run_internal() -> Result<(), String> {
     logging::init().map_err(|error| format!("Could not initialize controller logging: {error}"))?;
@@ -106,7 +109,13 @@ pub fn run_internal() -> Result<(), String> {
     let paths = AppPaths::discover()?;
     let _instance = ControllerInstance::acquire(&paths)?;
 
-    let mut aria2 = aria2_process::ManagedAria2::start(&paths)?;
+    let home_dir = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| String::from("Could not determine the home directory"))?;
+    let download_dir = load_download_directory(&paths, &home_dir)?;
+
+    let mut aria2 = aria2_process::ManagedAria2::start(&paths, &download_dir)?;
 
     ipc::run(&paths, &mut aria2)
 }
@@ -166,7 +175,7 @@ fn write_pid_automatically(path: &Path, pid: u32) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::ControllerInstance;
+    use super::{ControllerInstance, load_download_directory};
     use crate::paths::AppPaths;
     use std::{
         fs,
@@ -174,6 +183,62 @@ mod tests {
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    fn config_test_paths() -> (PathBuf, AppPaths, PathBuf) {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let root = std::env::temp_dir().join(format!(
+            "ariawatch-controller-config-test-{}-{unique_id}",
+            std::process::id()
+        ));
+
+        fs::create_dir(&root).unwrap();
+
+        let home_dir = root.join("home");
+
+        let paths = AppPaths {
+            data_dir: root.join("data"),
+            config_dir: root.join(".config/ariawatch"),
+            state_dir: root.join("state"),
+            runtime_dir: root.join("runtime"),
+        };
+
+        (root, paths, home_dir)
+    }
+
+    #[test]
+    fn uses_default_download_directory_when_config_is_missing() {
+        let (root, paths, home_dir) = config_test_paths();
+
+        let download_dir = load_download_directory(&paths, &home_dir).unwrap();
+
+        assert_eq!(download_dir, home_dir.join("Downloads"));
+        assert!(paths.config_file().is_file());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolves_configured_relative_download_directory() {
+        let (root, paths, home_dir) = config_test_paths();
+
+        fs::create_dir_all(&paths.config_dir).unwrap();
+
+        fs::write(
+            paths.config_file(),
+            "[downloads]\ndirectory = \"Documents/Downloads\"\n",
+        )
+        .unwrap();
+
+        let download_dir = load_download_directory(&paths, &home_dir).unwrap();
+
+        assert_eq!(download_dir, home_dir.join("Documents/Downloads"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn test_paths() -> (PathBuf, AppPaths) {
         let unique_id = SystemTime::now()

@@ -95,6 +95,11 @@ impl AppPaths {
         self.data_dir.join("history.sqlite3")
     }
 
+    // this one is for the config file
+    pub fn config_file(&self) -> PathBuf {
+        self.config_dir.join("config.toml")
+    }
+
     // this one is just the aria2 session file
     pub fn aria2_session_file(&self) -> PathBuf {
         self.data_dir.join("aria2.session")
@@ -289,6 +294,10 @@ mod tests {
         assert_eq!(
             paths.database_file(),
             PathBuf::from("/home/test/.local/share/ariawatch/history.sqlite3")
+        );
+        assert_eq!(
+            paths.config_file(),
+            PathBuf::from("/home/test/.config/ariawatch/config.toml")
         );
         assert_eq!(
             paths.aria2_session_file(),

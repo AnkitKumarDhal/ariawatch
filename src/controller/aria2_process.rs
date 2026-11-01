@@ -32,18 +32,12 @@ struct RpcSecretFile {
 impl ManagedAria2 {
     // starts the managed aria2 service (finding the perfect set of arguments for the aria2c was
     // hell)
-    pub(super) fn start(paths: &AppPaths) -> Result<Self, String> {
+    pub(super) fn start(paths: &AppPaths, download_dir: &Path) -> Result<Self, String> {
         paths.prepare_runtime_dir()?;
         prepare_private_dir(&paths.data_dir)?;
 
         let session_file = paths.aria2_session_file();
         prepare_session_file(&session_file)?;
-
-        let home = env::var_os("HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .ok_or_else(|| String::from("Could not determine the home directory"))?;
-        let download_dir = home.join("Downloads");
 
         fs::create_dir_all(&download_dir).map_err(|error| {
             format!(
@@ -73,7 +67,7 @@ impl ManagedAria2 {
             .arg("--quiet=true")
             .arg("--summary-interval=0")
             .arg(format!("--dir={}", download_dir.display()))
-            .current_dir(&download_dir)
+            .current_dir(download_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
