@@ -1,7 +1,11 @@
 use super::super::state::LoopState;
-use crate::{backend::DownloadBackend, logging};
+use crate::{
+    backend::DownloadBackend,
+    logging,
+    ui::event_loop::{TorrentWorker, torrent_worker::TorrentSource},
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // checks if input is a URI or not
 fn input_is_uri(input: &str) -> bool {
@@ -14,7 +18,41 @@ fn input_is_uri(input: &str) -> bool {
     .any(|prefix| lower.starts_with(prefix))
 }
 
-pub(super) fn handle(key: KeyEvent, ui: &mut LoopState, backend: &dyn DownloadBackend) {
+// Magnets need the special metadata-retrieval workflow
+fn input_is_magnet(input: &str) -> bool {
+    input.to_ascii_lowercase().starts_with("magnet:?")
+}
+
+// identifies local .torrent files
+fn input_is_local_torrent(input: &str) -> bool {
+    !input_is_uri(input)
+        && Path::new(input)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"))
+}
+
+// queues torrent prep without making the keyboard handler wait for it
+fn queue_torrent_preparation(
+    worker: &TorrentWorker,
+    source: TorrentSource,
+    queued_message: &str,
+) -> String {
+    match worker.prepare(source) {
+        Ok(()) => queued_message.to_owned(),
+        Err(error) => {
+            logging::warn(&format!("Could not queue torrent preparation: {error}"));
+            error
+        }
+    }
+}
+
+pub(super) fn handle(
+    key: KeyEvent,
+    ui: &mut LoopState,
+    backend: &dyn DownloadBackend,
+    torrent_worker: &TorrentWorker,
+) {
     match key.code {
         KeyCode::Enter => {
             let value = ui
@@ -29,19 +67,33 @@ pub(super) fn handle(key: KeyEvent, ui: &mut LoopState, backend: &dyn DownloadBa
             } else {
                 ui.add_input = None;
 
-                let result = if input_is_uri(&value) {
-                    backend.add_uri(&value)
+                if input_is_magnet(&value) {
+                    ui.status_message = queue_torrent_preparation(
+                        torrent_worker,
+                        TorrentSource::Magnet(value),
+                        "Retrieving magnet metadata...",
+                    );
+                } else if input_is_local_torrent(&value) {
+                    ui.status_message = queue_torrent_preparation(
+                        torrent_worker,
+                        TorrentSource::LocalFile(PathBuf::from(value)),
+                        "Preparing local torrent...",
+                    );
                 } else {
-                    backend.add_torrent_file(Path::new(&value))
-                };
+                    let result = if input_is_uri(&value) {
+                        backend.add_uri(&value)
+                    } else {
+                        backend.add_torrent_file(Path::new(&value))
+                    };
 
-                ui.status_message = match result {
-                    Ok(gid) => format!("Added download: {gid}"),
-                    Err(error) => {
-                        logging::error(&format!("Add download failed: {error}"));
-                        String::from("Add download failed; see logs")
-                    }
-                };
+                    ui.status_message = match result {
+                        Ok(gid) => format!("Added download: {gid}"),
+                        Err(error) => {
+                            logging::error(&format!("Add download failed: {error}"));
+                            String::from("Add download failed; see logs")
+                        }
+                    };
+                }
             }
 
             ui.redraw_needed = true;

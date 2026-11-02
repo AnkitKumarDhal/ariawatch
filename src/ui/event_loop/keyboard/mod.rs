@@ -5,9 +5,11 @@ use crate::{
     backend::DownloadBackend,
     history::HistoryStore,
     logging,
-    ui::{ExitChoice, event_loop::LoopState},
+    ui::{
+        ExitChoice,
+        event_loop::{LoopState, TorrentWorker},
+    },
 };
-use std::sync::Arc;
 
 mod add_input;
 mod exit_dialog;
@@ -22,6 +24,7 @@ pub(super) fn handle_key(
     managed_mode: bool,
     backend: &dyn DownloadBackend,
     history: &mut HistoryStore,
+    torrent_worker: &TorrentWorker,
 ) -> Option<ExitChoice> {
     if key.kind != KeyEventKind::Press {
         return None;
@@ -32,7 +35,7 @@ pub(super) fn handle_key(
     } else if ui.history_view.is_some() {
         history::handle(key, ui, history);
     } else if ui.add_input.is_some() {
-        add_input::handle(key, ui, backend);
+        add_input::handle(key, ui, backend, torrent_worker);
     } else if ui.show_exit_dialog {
         return exit_dialog::handle(key, ui);
     } else {

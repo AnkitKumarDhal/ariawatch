@@ -3,8 +3,12 @@ use super::{
     render::{DrawContext, draw},
 };
 use crate::{
-    app_state::AppState, backend::DownloadBackend, history::HistoryStore, logging,
+    app_state::AppState,
+    backend::DownloadBackend,
+    history::HistoryStore,
+    logging,
     monitor::MonitorUpdate,
+    ui::event_loop::torrent_worker::{TorrentWorker, TorrentWorkerEvent},
 };
 use crossterm::event::{self, Event};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -15,6 +19,7 @@ use std::{
 };
 mod keyboard;
 mod state;
+mod torrent_worker;
 use state::LoopState;
 
 // Handles keyboard input
@@ -27,8 +32,37 @@ pub(super) fn run(
     history: &mut HistoryStore,
 ) -> Result<ExitChoice, String> {
     let mut ui = LoopState::new();
+    let torrent_worker = TorrentWorker::start(Arc::clone(backend))?;
 
     loop {
+        while let Ok(worker_event) = torrent_worker.try_recv() {
+            match worker_event {
+                TorrentWorkerEvent::MetadataStarted { metadata_gid } => {
+                    let _ = state.remove_download(&metadata_gid);
+                    ui.status_message = String::from("Retrieving magnet metadata...");
+                }
+
+                TorrentWorkerEvent::Prepared { gid, files } => {
+                    ui.pending_torrent_selection = Some((gid, files));
+                    if let Some((pending_gid, pending_files)) =
+                        ui.pending_torrent_selection.as_ref()
+                    {
+                        ui.status_message = format!(
+                            "Torrent metadata ready: {} file(s) ({pending_gid})",
+                            pending_files.len()
+                        );
+                    }
+                }
+
+                TorrentWorkerEvent::Failed(error) => {
+                    logging::error(&format!("Torrent preparation failed: {error}"));
+                    ui.status_message = String::from("Torrent preparation failed; see logs");
+                }
+            }
+
+            ui.redraw_needed = true;
+        }
+
         for update in updates.try_iter() {
             match update {
                 MonitorUpdate::Snapshot(downloads) => {
@@ -128,6 +162,7 @@ pub(super) fn run(
                         managed_mode,
                         backend.as_ref(),
                         history,
+                        &torrent_worker,
                     ) {
                         return Ok(exit_choice);
                     }

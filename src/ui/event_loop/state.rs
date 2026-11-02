@@ -1,4 +1,4 @@
-use crate::{history::HistoryEntry, ui::PendingRemoval};
+use crate::{aria2::TorrentFile, history::HistoryEntry, ui::PendingRemoval};
 
 pub(super) struct LoopState {
     pub(super) status_message: String,
@@ -6,6 +6,7 @@ pub(super) struct LoopState {
     pub(super) show_exit_dialog: bool,
     pub(super) selected_exit_option: usize,
     pub(super) add_input: Option<String>,
+    pub(super) pending_torrent_selection: Option<(String, Vec<TorrentFile>)>,
     pub(super) pending_removal: Option<PendingRemoval>,
     pub(super) history_view: Option<Vec<HistoryEntry>>,
     pub(super) history_selection: usize,
@@ -19,6 +20,7 @@ impl LoopState {
             show_exit_dialog: false,
             selected_exit_option: 0,
             add_input: None,
+            pending_torrent_selection: None,
             pending_removal: None,
             history_view: None,
             history_selection: 0,
