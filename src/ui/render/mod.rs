@@ -1,13 +1,17 @@
 mod download_table;
 mod footer;
 mod formatting;
+pub(super) use formatting::format_bytes;
 mod header;
 mod more_info;
 use super::{
     PendingRemoval,
-    dialogs::{draw_add_dialog, draw_exit_dialog, draw_history_dialog, draw_remove_dialog},
+    dialogs::{
+        draw_add_dialog, draw_exit_dialog, draw_history_dialog, draw_remove_dialog,
+        draw_torrent_selection_dialog,
+    },
 };
-use crate::{app_state::AppState, history::HistoryEntry};
+use crate::{app_state::AppState, history::HistoryEntry, ui::TorrentSelection};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -23,6 +27,7 @@ pub(super) struct DrawContext<'a> {
     pub(super) pending_removal: Option<&'a PendingRemoval>,
     pub(super) history_entries: Option<&'a [HistoryEntry]>,
     pub(super) history_selection: usize,
+    pub(super) torrent_selection: Option<&'a TorrentSelection>,
 }
 
 // public function to draw the TUI
@@ -37,6 +42,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, context: DrawContext<'_>) {
         pending_removal,
         history_entries,
         history_selection,
+        torrent_selection,
     } = context;
 
     // 4 sections for the TUI
@@ -72,5 +78,9 @@ pub(super) fn draw(frame: &mut Frame<'_>, context: DrawContext<'_>) {
 
     if let Some(entries) = history_entries {
         draw_history_dialog(frame, entries, history_selection);
+    }
+
+    if let Some(selection) = torrent_selection {
+        draw_torrent_selection_dialog(frame, selection);
     }
 }

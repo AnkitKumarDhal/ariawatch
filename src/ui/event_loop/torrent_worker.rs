@@ -16,6 +16,13 @@ pub(super) enum TorrentSource {
     LocalFile(PathBuf),
 }
 
+// commands sent from the TUI to the background worker
+enum TorrentWorkerCommand {
+    Prepare(TorrentSource),
+    ApplySelection { gid: String, indices: Vec<u32> },
+    Cancel { gid: String },
+}
+
 // this is the enum of the msgs sent from the worker back to the TUI event loop
 pub(super) enum TorrentWorkerEvent {
     MetadataStarted {
@@ -25,13 +32,21 @@ pub(super) enum TorrentWorkerEvent {
         gid: String,
         files: Vec<TorrentFile>,
     },
+    SelectionApplied {
+        gid: String,
+    },
+    SelectionFailed(String),
+    Cancelled {
+        gid: String,
+    },
+    CancelFailed(String),
     Failed(String),
 }
 
 // this one owns the comms channel and background thread (yeah the processing and fetching of the
 // metadata and everything is a separate thread from the UI)
 pub(super) struct TorrentWorker {
-    commands: Sender<TorrentSource>,
+    commands: Sender<TorrentWorkerCommand>,
     events: Receiver<TorrentWorkerEvent>,
     busy: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
@@ -52,18 +67,44 @@ impl TorrentWorker {
         let _thread = thread::Builder::new()
             .name(String::from("ariawatch-torrent-worker"))
             .spawn(move || {
-                while let Ok(source) = command_receiver.recv() {
+                while let Ok(command) = command_receiver.recv() {
                     if worker_shutdown.load(Ordering::Acquire) {
                         break;
                     }
 
-                    let result =
-                        prepare_torrent(backend.as_ref(), source, &event_sender, &worker_shutdown);
+                    let event = match command {
+                        TorrentWorkerCommand::Prepare(source) => {
+                            match prepare_torrent(
+                                backend.as_ref(),
+                                source,
+                                &event_sender,
+                                &worker_shutdown,
+                            ) {
+                                Some(Ok((gid, files))) => {
+                                    TorrentWorkerEvent::Prepared { gid, files }
+                                }
+                                Some(Err(error)) => TorrentWorkerEvent::Failed(error),
+                                None => break,
+                            }
+                        }
 
-                    let event = match result {
-                        Some(Ok((gid, files))) => TorrentWorkerEvent::Prepared { gid, files },
-                        Some(Err(error)) => TorrentWorkerEvent::Failed(error),
-                        None => break,
+                        TorrentWorkerCommand::ApplySelection { gid, indices } => {
+                            let result = backend
+                                .set_torrent_file_selection(&gid, &indices)
+                                .and_then(|()| backend.resume_download(&gid));
+
+                            match result {
+                                Ok(()) => TorrentWorkerEvent::SelectionApplied { gid },
+                                Err(error) => TorrentWorkerEvent::SelectionFailed(error),
+                            }
+                        }
+
+                        TorrentWorkerCommand::Cancel { gid } => {
+                            match backend.remove_download(&gid, &Status::Paused) {
+                                Ok(()) => TorrentWorkerEvent::Cancelled { gid },
+                                Err(error) => TorrentWorkerEvent::CancelFailed(error),
+                            }
+                        }
                     };
 
                     if event_sender.send(event).is_err() {
@@ -83,18 +124,33 @@ impl TorrentWorker {
         })
     }
 
-    // this lil guy here queues a torrent-prep request for the background thread
-    pub(super) fn prepare(&self, source: TorrentSource) -> Result<(), String> {
+    // queues a command while ensuring only one operation runs at a time
+    fn submit(&self, command: TorrentWorkerCommand) -> Result<(), String> {
         self.busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| String::from("A torrent is already being prepared"))?;
+            .map_err(|_| String::from("A torrent operation is already running"))?;
 
-        if self.commands.send(source).is_err() {
+        if self.commands.send(command).is_err() {
             self.busy.store(false, Ordering::Release);
             return Err(String::from("Torrent worker is unavailable"));
         }
 
         Ok(())
+    }
+
+    // this lil guy here queues a torrent-prep request for the background thread
+    pub(super) fn prepare(&self, source: TorrentSource) -> Result<(), String> {
+        self.submit(TorrentWorkerCommand::Prepare(source))
+    }
+
+    // ququest he selected file indices for the application and download resumption
+    pub(super) fn apply_selection(&self, gid: String, indices: Vec<u32>) -> Result<(), String> {
+        self.submit(TorrentWorkerCommand::ApplySelection { gid, indices })
+    }
+
+    // queues the removal of a prepared torrent when the user cancels
+    pub(super) fn cancel_selection(&self, gid: String) -> Result<(), String> {
+        self.submit(TorrentWorkerCommand::Cancel { gid })
     }
 
     // This one reads a completed worker message without blocking the TUI
@@ -109,7 +165,8 @@ impl Drop for TorrentWorker {
     }
 }
 
-// this is one of the big dawgs. it performs the actual torrent prep in the background thread.
+// this is one of the big dawgs. it performs the actual torrent prep in the background thread,,, and
+// also does the metadata retrieval and obtains the actual torrent's file list
 fn prepare_torrent(
     backend: &dyn DownloadBackend,
     source: TorrentSource,

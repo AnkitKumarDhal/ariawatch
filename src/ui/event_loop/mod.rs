@@ -8,7 +8,10 @@ use crate::{
     history::HistoryStore,
     logging,
     monitor::MonitorUpdate,
-    ui::event_loop::torrent_worker::{TorrentWorker, TorrentWorkerEvent},
+    ui::{
+        TorrentSelection,
+        event_loop::torrent_worker::{TorrentWorker, TorrentWorkerEvent},
+    },
 };
 use crossterm::event::{self, Event};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -43,15 +46,44 @@ pub(super) fn run(
                 }
 
                 TorrentWorkerEvent::Prepared { gid, files } => {
-                    ui.pending_torrent_selection = Some((gid, files));
-                    if let Some((pending_gid, pending_files)) =
-                        ui.pending_torrent_selection.as_ref()
-                    {
+                    ui.pending_torrent_selection = Some(TorrentSelection::new(gid, files));
+
+                    if let Some(selection) = ui.pending_torrent_selection.as_ref() {
                         ui.status_message = format!(
-                            "Torrent metadata ready: {} file(s) ({pending_gid})",
-                            pending_files.len()
-                        );
+                            "Torrent ready: {} file(s), {} selected",
+                            selection.files().len(),
+                            selection.selected_count()
+                        )
                     }
+                }
+
+                TorrentWorkerEvent::SelectionApplied { gid } => {
+                    ui.pending_torrent_selection = None;
+                    ui.status_message = format!("Torrent download started: {gid}");
+                }
+
+                TorrentWorkerEvent::SelectionFailed(error) => {
+                    logging::error(&format!("Applying torrent file selection failed: {error}"));
+                    if let Some(selection) = ui.pending_torrent_selection.as_mut() {
+                        selection.set_action(None);
+                    }
+
+                    ui.status_message = String::from("Could not start torrent; see logs");
+                }
+
+                TorrentWorkerEvent::Cancelled { gid } => {
+                    let _ = state.remove_download(&gid);
+                    ui.pending_torrent_selection = None;
+                    ui.status_message = String::from("Torrent selection cancelled");
+                }
+
+                TorrentWorkerEvent::CancelFailed(error) => {
+                    logging::error(&format!("Could not cancel prepared torrent: {error}"));
+                    if let Some(selection) = ui.pending_torrent_selection.as_mut() {
+                        selection.set_action(None);
+                    }
+
+                    ui.status_message = String::from("Could not cancel torrent; see logs");
                 }
 
                 TorrentWorkerEvent::Failed(error) => {
@@ -139,6 +171,7 @@ pub(super) fn run(
                             pending_removal: ui.pending_removal.as_ref(),
                             history_entries: ui.history_view.as_deref(),
                             history_selection: ui.history_selection,
+                            torrent_selection: ui.pending_torrent_selection.as_ref(),
                         },
                     )
                 })

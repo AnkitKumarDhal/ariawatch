@@ -1,4 +1,5 @@
-use crate::history::HistoryEntry;
+use super::render::format_bytes;
+use crate::{history::HistoryEntry, ui::TorrentSelection};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -229,5 +230,94 @@ pub(super) fn draw_history_dialog(
         Paragraph::new("↑/↓ or j/k: navigate  ·  r: refresh  ·  h/Esc: close")
             .alignment(Alignment::Center),
         sections[1],
+    );
+}
+
+// draws the torrent file-selection dialog
+pub(super) fn draw_torrent_selection_dialog(frame: &mut Frame<'_>, selection: &TorrentSelection) {
+    let area = centered_rect(88, 80, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(
+            " Select Torrent Files ({}/{})",
+            selection.selected_count(),
+            selection.files().len()
+        ))
+        .title_alignment(Alignment::Center);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+    let summary = Paragraph::new(format!("Torrent GID: {}", selection.gid()));
+    frame.render_widget(summary, sections[0]);
+
+    let visible_rows = sections[1].height.saturating_sub(1).max(1) as usize;
+    let first_visible_index = selection
+        .cursor()
+        .saturating_add(1)
+        .saturating_sub(visible_rows);
+
+    let rows = selection
+        .files()
+        .iter()
+        .enumerate()
+        .skip(first_visible_index)
+        .take(visible_rows)
+        .map(|(index, file)| {
+            let checkbox = if file.selected { "[x]" } else { "[ ]" };
+
+            let row = Row::new(vec![
+                Cell::from(format!("{checkbox} {}", file.path)),
+                Cell::from(format_bytes(file.length)),
+                Cell::from(format_bytes(file.completed_length)),
+            ]);
+
+            if index == selection.cursor() {
+                row.style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+            } else {
+                row
+            }
+        });
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(66),
+            Constraint::Percentage(17),
+            Constraint::Percentage(17),
+        ],
+    )
+    .header(
+        Row::new(["File", "Size", "Completed"])
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+    )
+    .column_spacing(1);
+
+    frame.render_widget(table, sections[1]);
+
+    let footer = match selection.action() {
+        Some(super::TorrentSelectionAction::Applying) => {
+            "Applying file selection and starting download..."
+        }
+        Some(super::TorrentSelectionAction::Cancelling) => "Cancelling torrent...",
+        None => {
+            "↑/↓ or j/k: move  ·  Space: toggle  ·  a: select all  ·  n: deselect all  ·  Enter: start  ·  Esc: cancel"
+        }
+    };
+
+    frame.render_widget(
+        Paragraph::new(footer).alignment(Alignment::Center),
+        sections[2],
     );
 }

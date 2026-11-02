@@ -1,5 +1,5 @@
 // just formats the size by like B, KiB, MiB, and such
-pub(super) fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
 
     let mut value = bytes as f64;

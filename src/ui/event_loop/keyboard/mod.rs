@@ -1,5 +1,3 @@
-use crossterm::event::{KeyEvent, KeyEventKind};
-
 use crate::{
     app_state::AppState,
     backend::DownloadBackend,
@@ -10,12 +8,13 @@ use crate::{
         event_loop::{LoopState, TorrentWorker},
     },
 };
-
+use crossterm::event::{KeyEvent, KeyEventKind};
 mod add_input;
 mod exit_dialog;
 mod history;
 mod normal;
 mod removal;
+mod torrent_selection;
 
 pub(super) fn handle_key(
     key: KeyEvent,
@@ -30,7 +29,9 @@ pub(super) fn handle_key(
         return None;
     }
 
-    if ui.pending_removal.is_some() {
+    if ui.pending_torrent_selection.is_some() {
+        torrent_selection::handle(key, ui, torrent_worker);
+    } else if ui.pending_removal.is_some() {
         removal::handle(key, ui, state, backend, history);
     } else if ui.history_view.is_some() {
         history::handle(key, ui, history);
