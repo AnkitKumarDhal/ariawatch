@@ -165,6 +165,21 @@ impl Drop for TorrentWorker {
     }
 }
 
+// removes a temp aria2 entry when torrent prep cannot continue,,, like ya see when there is suppose
+// an error while fetching the metadata from the magnet or something liek that, the entry can be stuck
+fn cleanup_failed_prep_entry(
+    backend: &dyn DownloadBackend,
+    gid: &str,
+    status: &Status,
+    description: &str,
+) {
+    if let Err(error) = backend.remove_download(gid, status) {
+        logging::warn(&format!(
+            "Could not remove {description} {gid} after torrent prep failed: {error}"
+        ));
+    }
+}
+
 // this is one of the big dawgs. it performs the actual torrent prep in the background thread,,, and
 // also does the metadata retrieval and obtains the actual torrent's file list
 fn prepare_torrent(
@@ -218,6 +233,19 @@ fn prepare_torrent(
                             .map(|code| format!("aria2 reported metadata error code {code}"))
                     });
 
+                    let metadata_status = if metadata.status == "error" {
+                        Status::Error
+                    } else {
+                        Status::Complete
+                    };
+
+                    cleanup_failed_prep_entry(
+                        backend,
+                        &metadata_gid,
+                        &metadata_status,
+                        "magnet metadata entry",
+                    );
+
                     return Some(Err(detail.unwrap_or_else(|| {
                         String::from("Magnet metadata finished without creating a torrent download")
                     })));
@@ -235,10 +263,14 @@ fn prepare_torrent(
 
     let files = match backend.get_torrent_files(&gid) {
         Ok(files) => files,
-        Err(error) => return Some(Err(error)),
+        Err(error) => {
+            cleanup_failed_prep_entry(backend, &gid, &Status::Paused, "prepared torrent entry");
+            return Some(Err(error));
+        }
     };
 
     if files.is_empty() {
+        cleanup_failed_prep_entry(backend, &gid, &Status::Paused, "prepared torrent entry");
         return Some(Err(String::from(
             "aria2 returned an empty torrent file list",
         )));
