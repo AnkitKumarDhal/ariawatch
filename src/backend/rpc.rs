@@ -190,10 +190,14 @@ impl DownloadBackend for ExternalAria2Backend {
         )?;
 
         let mut report = FileDeleteReport::default();
+        let mut deleted_paths = Vec::new();
 
         for path in safe_files {
             match fs::remove_file(&path) {
-                Ok(()) => report.deleted_files += 1,
+                Ok(()) => {
+                    report.deleted_files += 1;
+                    deleted_paths.push(path);
+                }
                 Err(error) => {
                     report.failed_files += 1;
                     logging::error(&format!(
@@ -202,6 +206,14 @@ impl DownloadBackend for ExternalAria2Backend {
                     ));
                 }
             }
+        }
+
+        if let Err(error) =
+            super::file_safety::remove_empty_parent_directories(&deleted_paths, &directory)
+        {
+            logging::error(&format!(
+                "Download files were deleted, but empty directory cleanup failed: {error}"
+            ));
         }
 
         Ok(report)
