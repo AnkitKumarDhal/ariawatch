@@ -285,12 +285,18 @@ fn remove_download_result(
     gid: &str,
     rpc_secret: Option<&str>,
 ) -> Result<(), String> {
-    let result = call_rpc_method(
+    let result = match call_rpc_method(
         endpoint,
         "aria2.removeDownloadResult",
         vec![serde_json::json!(gid)],
         rpc_secret,
-    )?;
+    ) {
+        Ok(result) => result,
+        Err(error) if is_missing_download_result_error(&error, gid) => {
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
 
     if result.as_str() == Some("OK") {
         Ok(())
@@ -299,6 +305,10 @@ fn remove_download_result(
             "aria2.removeDownloadResult returned an unexpected result",
         ))
     }
+}
+
+fn is_missing_download_result_error(error: &str, gid: &str) -> bool {
+    error.contains(&format!("Could not remove download result of GID#{gid}"))
 }
 
 pub fn remove_download(
@@ -337,7 +347,7 @@ pub fn remove_download(
                 return Err(String::from("aria2.remove returned an unexpected result"));
             }
 
-            Ok(())
+            remove_download_result(endpoint, gid, rpc_secret)
         }
 
         Status::Complete | Status::Error | Status::Removed => {
@@ -437,7 +447,8 @@ pub fn get_download_file_paths(
 #[cfg(test)]
 mod control_tests {
     use super::{
-        build_add_torrent_request, build_add_uri_request, parse_download_file_paths, validate_gid,
+        build_add_torrent_request, build_add_uri_request, is_missing_download_result_error,
+        parse_download_file_paths, validate_gid,
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
@@ -576,5 +587,20 @@ mod control_tests {
     #[test]
     fn rejects_non_magnet_uri_for_metadata_request() {
         assert!(super::build_add_magnet_request("https://example.com/file.zip", None).is_err());
+    }
+
+    #[test]
+    fn recognizes_an_already_absent_download_result() {
+        let gid = "ff30d62a336365b0";
+        let error = format!("aria2 rpc error 1: Could not remove download result of GID#{gid}");
+
+        assert!(is_missing_download_result_error(&error, gid));
+    }
+
+    #[test]
+    fn does_not_ignore_unrelated_removal_errors() {
+        let error = "aria2 rpc error 1: Invalid GID";
+
+        assert!(!is_missing_download_result_error(error, "ff30d62a336365b0"));
     }
 }
