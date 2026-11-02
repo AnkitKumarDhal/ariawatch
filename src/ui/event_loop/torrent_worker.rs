@@ -180,6 +180,21 @@ fn cleanup_failed_prep_entry(
     }
 }
 
+// this right here is the tiny function that doe sthe work of attempting to remove an entry whos
+// current aria2 state is unknown,,, first it tries to remove it as an active download, if that
+// fails, then it tries removing it as a stopped download (error/complete/removed)
+fn cleanup_unknown_prep_entry(backend: &dyn DownloadBackend, gid: &str, description: &str) {
+    if let Err(active_error) = backend.remove_download(gid, &Status::Active)
+        && let Err(stopped_error) = backend.remove_download(gid, &Status::Error)
+    {
+        logging::warn(&format!(
+            "Could not remove {description} {gid}: \
+                active cleanup failed: {active_error}; \
+                stopped-entry cleanup failed: {stopped_error}"
+        ));
+    }
+}
+
 // this is one of the big dawgs. it performs the actual torrent prep in the background thread,,, and
 // also does the metadata retrieval and obtains the actual torrent's file list
 fn prepare_torrent(
@@ -211,7 +226,10 @@ fn prepare_torrent(
 
                 let metadata = match backend.get_torrent_metadata_status(&metadata_gid) {
                     Ok(metadata) => metadata,
-                    Err(error) => return Some(Err(error)),
+                    Err(error) => {
+                        cleanup_unknown_prep_entry(backend, &metadata_gid, "magnet metadata entry");
+                        return Some(Err(error));
+                    }
                 };
 
                 if metadata.status == "complete"
