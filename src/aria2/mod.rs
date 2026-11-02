@@ -11,4 +11,7 @@ pub use operations::{
     resume_all, resume_download,
 };
 pub use rpc::{build_get_version_request, build_rpc_request, parse_rpc_response, send_rpc_request};
-pub use torrents::{TorrentFile, get_torrent_files, set_torrent_file_selection};
+pub use torrents::{
+    TorrentFile, TorrentMetadataStatus, get_torrent_files, get_torrent_metadata_status,
+    set_torrent_file_selection,
+};

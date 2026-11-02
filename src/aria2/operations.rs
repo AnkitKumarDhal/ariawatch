@@ -32,6 +32,60 @@ pub fn build_add_uri_request(uri: &str, rpc_secret: Option<&str>) -> Result<Stri
     build_rpc_request("aria2.addUri", vec![serde_json::json!([uri])], rpc_secret)
 }
 
+// this function is kinda critical on timing ya' know? this one builds an aria2.addUri request (like
+// hte previous one) and then pauses it right after retrieving the magnet metadata
+pub(super) fn build_add_magnet_request(
+    uri: &str,
+    rpc_secret: Option<&str>,
+) -> Result<String, String> {
+    let uri = uri.trim();
+
+    if !uri.to_ascii_lowercase().starts_with("magnet:?") {
+        return Err(String::from("Expected a magnet URI"));
+    }
+
+    if uri.is_empty() || uri.chars().any(char::is_whitespace) {
+        return Err(String::from("Magnet URI is empty or contains whitespace"));
+    }
+
+    build_rpc_request(
+        "aria2.addUri",
+        vec![
+            serde_json::json!([uri]),
+            serde_json::json!({"pause-metadata": "true"}),
+        ],
+        rpc_secret,
+    )
+}
+
+// now this one, its similar (kinda confusing, now that i look at it), but the important distinction
+// here is that it builds an *aria2.addTorrent* request taht pauses the torrent after its metadata
+// has been *processed*
+pub(super) fn build_add_paused_torrent_request(
+    contents: &[u8],
+    rpc_secret: Option<&str>,
+) -> Result<String, String> {
+    if contents.is_empty() {
+        return Err(String::from("Torrent file is empty"));
+    }
+
+    if contents.len() as u64 > MAX_TORRENT_BYTES {
+        return Err(String::from("Torrent file exceeds the 1.4MB upload limit"));
+    }
+
+    let encoded = BASE64.encode(contents);
+
+    build_rpc_request(
+        "aria2.addTorrent",
+        vec![
+            serde_json::json!(encoded),
+            serde_json::json!([]),
+            serde_json::json!({"pause-metadata": "true", "pause": "true"}),
+        ],
+        rpc_secret,
+    )
+}
+
 // does the same thing as above, but for .torrent files
 pub fn build_add_torrent_request(
     contents: &[u8],
@@ -436,5 +490,38 @@ mod control_tests {
 
         assert!(error.contains("expected a non-empty string"));
         assert!(error.contains("null"));
+    }
+
+    #[test]
+    fn builds_magnet_request_with_metadata_pause() {
+        let request =
+            super::build_add_magnet_request("magnet:?xt=urn:btih:0123456789abcdef", None).unwrap();
+
+        let value: serde_json::Value = serde_json::from_str(&request).unwrap();
+
+        assert_eq!(value["method"], "aria2.addUri");
+        assert_eq!(
+            value["params"][0][0],
+            "magnet:?xt=urn:btih:0123456789abcdef"
+        );
+        assert_eq!(value["params"][1]["pause-metadata"], "true");
+    }
+
+    #[test]
+    fn builds_local_torrent_request_with_pause_options() {
+        let request =
+            super::build_add_paused_torrent_request(b"fake torrent contents", None).unwrap();
+
+        let value: serde_json::Value = serde_json::from_str(&request).unwrap();
+
+        assert_eq!(value["method"], "aria2.addTorrent");
+        assert_eq!(value["params"][1], serde_json::json!([]));
+        assert_eq!(value["params"][2]["pause-metadata"], "true");
+        assert_eq!(value["params"][2]["pause"], "true");
+    }
+
+    #[test]
+    fn rejects_non_magnet_uri_for_metadata_request() {
+        assert!(super::build_add_magnet_request("https://example.com/file.zip", None).is_err());
     }
 }

@@ -25,6 +25,15 @@ struct RawTorrentFile {
     selected: String,
 }
 
+// this is the state that is needed for a torrent/magnet uri while aria2 retrieves metadata
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TorrentMetadataStatus {
+    pub status: String,
+    pub followed_by: Vec<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}
+
 impl TryFrom<RawTorrentFile> for TorrentFile {
     type Error = String;
 
@@ -165,6 +174,58 @@ pub fn set_torrent_file_selection(
             "aria2.changeOption returned an unexpected result",
         )),
     }
+}
+
+// this bad boi reads the metadata state of the download.
+pub fn get_torrent_metadata_status(
+    endpoint: &str,
+    gid: &str,
+    rpc_secret: Option<&str>,
+) -> Result<TorrentMetadataStatus, String> {
+    validate_gid(gid)?;
+
+    let result = call_rpc_method(
+        endpoint,
+        "aria2.tellStatus",
+        vec![
+            serde_json::json!(gid),
+            serde_json::json!(["status", "followedBy", "errorCode", "errorMessage"]),
+        ],
+        rpc_secret,
+    )?;
+
+    let status = result
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| String::from("aria2.tellStatus returned no valid status"))?
+        .to_owned();
+
+    let followed_by = match result.get("followedBy") {
+        None | Some(serde_json::Value::Null) => Vec::new(),
+        Some(value) => serde_json::from_value::<Vec<String>>(value.clone())
+            .map_err(|error| format!("Invalid followedBy field: {error}"))?,
+    };
+
+    for child_gid in &followed_by {
+        validate_gid(child_gid)?;
+    }
+
+    let error_code = result
+        .get("errorCode")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+
+    let error_message = result
+        .get("errorMessage")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+
+    Ok(TorrentMetadataStatus {
+        status,
+        followed_by,
+        error_code,
+        error_message,
+    })
 }
 
 #[cfg(test)]
