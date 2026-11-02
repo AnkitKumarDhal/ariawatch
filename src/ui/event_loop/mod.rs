@@ -121,9 +121,14 @@ pub(super) fn run(
 
             match event {
                 Event::Key(key) => {
-                    if let Some(exit_choice) =
-                        keyboard::handle_key(key, &mut ui, state, managed_mode, backend, history)
-                    {
+                    if let Some(exit_choice) = keyboard::handle_key(
+                        key,
+                        &mut ui,
+                        state,
+                        managed_mode,
+                        backend.as_ref(),
+                        history,
+                    ) {
                         return Ok(exit_choice);
                     }
                 }

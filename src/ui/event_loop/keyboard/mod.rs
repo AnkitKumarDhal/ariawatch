@@ -20,7 +20,7 @@ pub(super) fn handle_key(
     ui: &mut LoopState,
     state: &mut AppState,
     managed_mode: bool,
-    backend: &Arc<dyn DownloadBackend>,
+    backend: &dyn DownloadBackend,
     history: &mut HistoryStore,
 ) -> Option<ExitChoice> {
     if key.kind != KeyEventKind::Press {
