@@ -6,10 +6,14 @@ use super::{
     PendingRemoval,
     dialogs::{
         draw_add_dialog, draw_exit_dialog, draw_history_dialog, draw_remove_dialog,
-        draw_torrent_selection_dialog,
+        draw_torrent_prep_dialog, draw_torrent_selection_dialog,
     },
 };
-use crate::{app_state::AppState, history::HistoryEntry, ui::TorrentSelection};
+use crate::{
+    app_state::AppState,
+    history::HistoryEntry,
+    ui::{TorrentPreparation, TorrentSelection},
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -26,6 +30,7 @@ pub(super) struct DrawContext<'a> {
     pub(super) history_entries: Option<&'a [HistoryEntry]>,
     pub(super) history_selection: usize,
     pub(super) torrent_selection: Option<&'a TorrentSelection>,
+    pub(super) torrent_preparation: Option<&'a TorrentPreparation>,
 }
 
 // public function to draw the TUI
@@ -41,6 +46,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, context: DrawContext<'_>) {
         history_entries,
         history_selection,
         torrent_selection,
+        torrent_preparation,
     } = context;
 
     // 4 sections for the TUI
@@ -80,5 +86,9 @@ pub(super) fn draw(frame: &mut Frame<'_>, context: DrawContext<'_>) {
 
     if let Some(selection) = torrent_selection {
         draw_torrent_selection_dialog(frame, selection);
+    }
+
+    if let Some(preparation) = torrent_preparation {
+        draw_torrent_prep_dialog(frame, preparation);
     }
 }

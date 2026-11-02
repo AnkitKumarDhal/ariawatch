@@ -1,6 +1,9 @@
 use crate::{
     history::HistoryEntry,
-    ui::{TorrentSelection, formatting::format_bytes},
+    ui::{
+        TorrentPreparation, TorrentPreparationSource, TorrentSelection,
+        formatting::{format_bytes, format_duration},
+    },
 };
 use ratatui::{
     Frame,
@@ -322,4 +325,54 @@ pub(super) fn draw_torrent_selection_dialog(frame: &mut Frame<'_>, selection: &T
         Paragraph::new(footer).alignment(Alignment::Center),
         sections[2],
     );
+}
+
+// displays the progress of asyn torrent prep operation
+pub(super) fn draw_torrent_prep_dialog(frame: &mut Frame<'_>, preparation: &TorrentPreparation) {
+    let area = centered_rect(62, 36, frame.area());
+    frame.render_widget(Clear, area);
+
+    let spinner_frames = ["|", "/", "-", "\\"];
+    let elapsed = preparation.elapsed();
+    let spinner_index = ((elapsed.as_millis() / 150) % 4) as usize;
+    let spinner = spinner_frames[spinner_index];
+
+    let (title, description) = match preparation.source() {
+        TorrentPreparationSource::Magnet => (
+            " Preparing Magnet Torrent ",
+            "Waiting for torrent metadata from the swarm...",
+        ),
+        TorrentPreparationSource::LocalFile => {
+            (" Preparing Torrent File ", "Reading torrent metadata...")
+        }
+    };
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{spinner} {description}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(format!(
+            "Elapsed: {}",
+            format_duration(Some(elapsed.as_secs()))
+        )),
+    ];
+
+    if let Some(gid) = preparation.metadata_gid() {
+        lines.push(Line::from(format!("Metadata GID: {gid}")));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from("AriaWatch remains responsive while this runs."));
+
+    let dialog = Paragraph::new(lines).alignment(Alignment::Center).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_alignment(Alignment::Center),
+    );
+
+    frame.render_widget(dialog, area);
 }
