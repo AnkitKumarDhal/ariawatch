@@ -1,6 +1,6 @@
 use crate::{
     history::HistoryEntry,
-    ui::{PendingRemoval, TorrentSelection},
+    ui::{PendingRemoval, TorrentPreparation, TorrentSelection},
 };
 
 pub(super) struct LoopState {
@@ -10,6 +10,7 @@ pub(super) struct LoopState {
     pub(super) selected_exit_option: usize,
     pub(super) add_input: Option<String>,
     pub(super) pending_torrent_selection: Option<TorrentSelection>,
+    pub(super) pending_torrent_preparation: Option<TorrentPreparation>,
     pub(super) pending_removal: Option<PendingRemoval>,
     pub(super) history_view: Option<Vec<HistoryEntry>>,
     pub(super) history_selection: usize,
@@ -24,6 +25,7 @@ impl LoopState {
             selected_exit_option: 0,
             add_input: None,
             pending_torrent_selection: None,
+            pending_torrent_preparation: None,
             pending_removal: None,
             history_view: None,
             history_selection: 0,

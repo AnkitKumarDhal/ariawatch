@@ -42,10 +42,14 @@ pub(super) fn run(
             match worker_event {
                 TorrentWorkerEvent::MetadataStarted { metadata_gid } => {
                     let _ = state.remove_download(&metadata_gid);
+                    if let Some(preparation) = ui.pending_torrent_preparation.as_mut() {
+                        preparation.set_metadata_gid(metadata_gid);
+                    }
                     ui.status_message = String::from("Retrieving magnet metadata...");
                 }
 
                 TorrentWorkerEvent::Prepared { gid, files } => {
+                    ui.pending_torrent_preparation = None;
                     ui.pending_torrent_selection = Some(TorrentSelection::new(gid, files));
 
                     if let Some(selection) = ui.pending_torrent_selection.as_ref() {
@@ -87,6 +91,7 @@ pub(super) fn run(
                 }
 
                 TorrentWorkerEvent::Failed(error) => {
+                    ui.pending_torrent_preparation = None;
                     logging::error(&format!("Torrent preparation failed: {error}"));
                     ui.status_message = String::from("Torrent preparation failed; see logs");
                 }
@@ -153,6 +158,10 @@ pub(super) fn run(
                 MonitorUpdate::Heartbeat => continue,
             }
 
+            ui.redraw_needed = true;
+        }
+
+        if ui.pending_torrent_preparation.is_some() {
             ui.redraw_needed = true;
         }
 

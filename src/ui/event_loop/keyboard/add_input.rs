@@ -2,7 +2,10 @@ use super::super::state::LoopState;
 use crate::{
     backend::DownloadBackend,
     logging,
-    ui::event_loop::{TorrentWorker, torrent_worker::TorrentSource},
+    ui::{
+        TorrentPreparation, TorrentPreparationSource,
+        event_loop::{TorrentWorker, torrent_worker::TorrentSource},
+    },
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::{Path, PathBuf};
@@ -23,6 +26,11 @@ fn input_is_magnet(input: &str) -> bool {
     input.to_ascii_lowercase().starts_with("magnet:?")
 }
 
+// removes invisible characters that can occasionaly appear when copying URLs from websites or formatted text
+fn normalize_input(input: &str) -> &str {
+    input.trim().trim_start_matches('\u{feff}').trim()
+}
+
 // identifies local .torrent files
 fn input_is_local_torrent(input: &str) -> bool {
     !input_is_uri(input)
@@ -34,14 +42,20 @@ fn input_is_local_torrent(input: &str) -> bool {
 
 // queues torrent prep without making the keyboard handler wait for it
 fn queue_torrent_preparation(
+    ui: &mut LoopState,
     worker: &TorrentWorker,
     source: TorrentSource,
+    preparation_source: TorrentPreparationSource,
     queued_message: &str,
 ) -> String {
     match worker.prepare(source) {
-        Ok(()) => queued_message.to_owned(),
+        Ok(()) => {
+            ui.pending_torrent_preparation = Some(TorrentPreparation::new(preparation_source));
+            queued_message.to_owned()
+        }
+
         Err(error) => {
-            logging::warn(&format!("Could not queue torrent preparation: {error}"));
+            logging::warn(&format!("Could not queue torrent preparartion: {error}"));
             error
         }
     }
@@ -55,12 +69,7 @@ pub(super) fn handle(
 ) {
     match key.code {
         KeyCode::Enter => {
-            let value = ui
-                .add_input
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .to_owned();
+            let value = normalize_input(ui.add_input.as_deref().unwrap_or_default()).to_owned();
 
             if value.is_empty() {
                 ui.status_message = String::from("Enter a URL, magnet URI or .torrent path");
@@ -68,17 +77,23 @@ pub(super) fn handle(
                 ui.add_input = None;
 
                 if input_is_magnet(&value) {
-                    ui.status_message = queue_torrent_preparation(
+                    let message = queue_torrent_preparation(
+                        ui,
                         torrent_worker,
                         TorrentSource::Magnet(value),
+                        TorrentPreparationSource::Magnet,
                         "Retrieving magnet metadata...",
                     );
+                    ui.status_message = message;
                 } else if input_is_local_torrent(&value) {
-                    ui.status_message = queue_torrent_preparation(
+                    let message = queue_torrent_preparation(
+                        ui,
                         torrent_worker,
                         TorrentSource::LocalFile(PathBuf::from(value)),
+                        TorrentPreparationSource::LocalFile,
                         "Preparing local torrent...",
                     );
+                    ui.status_message = message;
                 } else {
                     let result = if input_is_uri(&value) {
                         backend.add_uri(&value)
@@ -121,5 +136,36 @@ pub(super) fn handle(
         }
 
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{input_is_magnet, input_is_uri, normalize_input};
+
+    #[test]
+    fn recognizes_standard_magnet_links() {
+        let input = "magnet:?xt=urn:btih:0123456789abcdef";
+
+        assert!(input_is_magnet(input));
+        assert!(input_is_uri(input));
+    }
+
+    #[test]
+    fn recognizes_magnet_links_case_insensitively() {
+        let input = "MAGNET:?xt=urn:btih:0123456789abcdef";
+
+        assert!(input_is_magnet(input));
+        assert!(input_is_uri(input));
+    }
+
+    #[test]
+    fn removes_leading_bom_from_pasted_magnet_links() {
+        let input = "\u{feff}magnet:?xt=urn:btih:0123456789abcdef";
+        let normalized = normalize_input(input);
+
+        assert_eq!(normalized, "magnet:?xt=urn:btih:0123456789abcdef");
+        assert!(input_is_magnet(normalized));
+        assert!(input_is_uri(normalized));
     }
 }

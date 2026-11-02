@@ -15,6 +15,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     io,
     sync::{Arc, mpsc::Receiver},
+    time::{Duration, Instant},
 };
 
 // this is for the choice of how to exit the applciation
@@ -31,6 +32,20 @@ struct PendingRemoval {
     name: String,
     status: Status,
     delete_files: bool,
+}
+
+// identifies the kind of torrent is currently being prepped
+#[derive(Debug, Clone, Copy)]
+pub(super) enum TorrentPreparationSource {
+    Magnet,
+    LocalFile,
+}
+
+// holds the info needed to display the ongoing torrent prep
+pub(super) struct TorrentPreparation {
+    source: TorrentPreparationSource,
+    started_at: Instant,
+    metadata_gid: Option<String>,
 }
 
 // this one describes waht the worker is currently doing with the selected torrent
@@ -51,6 +66,32 @@ pub(super) struct TorrentSelection {
 // Restores terminal state even if the UI exits unexpectedly
 struct TerminalGuard {
     active: bool,
+}
+
+impl TorrentPreparation {
+    pub(super) fn new(source: TorrentPreparationSource) -> Self {
+        Self {
+            source,
+            started_at: Instant::now(),
+            metadata_gid: None,
+        }
+    }
+
+    pub(super) fn source(&self) -> TorrentPreparationSource {
+        self.source
+    }
+
+    pub(super) fn elapsed(&self) -> Duration {
+        self.started_at.elapsed()
+    }
+
+    pub(super) fn metadata_gid(&self) -> Option<&str> {
+        self.metadata_gid.as_deref()
+    }
+
+    pub(super) fn set_metadata_gid(&mut self, gid: String) {
+        self.metadata_gid = Some(gid);
+    }
 }
 
 impl TorrentSelection {
