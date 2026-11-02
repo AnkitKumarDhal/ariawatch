@@ -1,7 +1,7 @@
 use super::super::state::LoopState;
 use crate::{backend::DownloadBackend, logging};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 // checks if input is a URI or not
 fn input_is_uri(input: &str) -> bool {
@@ -14,7 +14,7 @@ fn input_is_uri(input: &str) -> bool {
     .any(|prefix| lower.starts_with(prefix))
 }
 
-pub(super) fn handle(key: KeyEvent, ui: &mut LoopState, backend: &dyn DownloadBackend) {
+pub(super) fn handle(key: KeyEvent, ui: &mut LoopState, backend: &Arc<dyn DownloadBackend>) {
     match key.code {
         KeyCode::Enter => {
             let value = ui

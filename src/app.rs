@@ -9,6 +9,7 @@ use crate::{
     paths::AppPaths,
     ui,
 };
+use std::sync::Arc;
 
 fn should_stop_controller(managed_mode: bool, exit_choice: ui::ExitChoice) -> bool {
     managed_mode && exit_choice == ui::ExitChoice::StopController
@@ -38,7 +39,7 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     };
     let mut history = HistoryStore::open(&history_path)?;
 
-    let backend = backend::create_backend(config)?;
+    let backend: Arc<dyn backend::DownloadBackend> = Arc::from(backend::create_backend(config)?);
     let version = backend.get_version()?;
 
     println!("Connected to aria2 version: {version}");
@@ -79,7 +80,7 @@ pub fn run(config: RuntimeConfig) -> Result<(), String> {
     println!("Tracked downloads: {}", state.download_count());
 
     let updates = backend.start_monitor(state.active_gids())?;
-    let exit_choice = ui::run(state, updates, managed_mode, backend.as_ref(), &mut history)?;
+    let exit_choice = ui::run(state, updates, managed_mode, &backend, &mut history)?;
     if should_stop_controller(managed_mode, exit_choice) {
         controller::stop(&paths)?;
     }

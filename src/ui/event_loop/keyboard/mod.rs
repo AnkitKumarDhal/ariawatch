@@ -7,6 +7,7 @@ use crate::{
     logging,
     ui::{ExitChoice, event_loop::LoopState},
 };
+use std::sync::Arc;
 
 mod add_input;
 mod exit_dialog;
@@ -19,7 +20,7 @@ pub(super) fn handle_key(
     ui: &mut LoopState,
     state: &mut AppState,
     managed_mode: bool,
-    backend: &dyn DownloadBackend,
+    backend: &Arc<dyn DownloadBackend>,
     history: &mut HistoryStore,
 ) -> Option<ExitChoice> {
     if key.kind != KeyEventKind::Press {

@@ -11,7 +11,10 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, sync::mpsc::Receiver};
+use std::{
+    io,
+    sync::{Arc, mpsc::Receiver},
+};
 
 // this is for the choice of how to exit the applciation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +85,7 @@ pub fn run(
     mut state: AppState,
     updates: Receiver<MonitorUpdate>,
     managed_mode: bool,
-    back: &dyn DownloadBackend,
+    back: &Arc<dyn DownloadBackend>,
     history: &mut HistoryStore,
 ) -> Result<ExitChoice, String> {
     enable_raw_mode().map_err(|error| format!("Could not enable raw mode: {error}"))?;

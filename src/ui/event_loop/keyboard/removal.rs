@@ -1,12 +1,13 @@
 use super::super::state::LoopState;
 use crate::{app_state::AppState, backend::DownloadBackend, history::HistoryStore, logging};
 use crossterm::event::{KeyCode, KeyEvent};
+use std::sync::Arc;
 
 pub(super) fn handle(
     key: KeyEvent,
     ui: &mut LoopState,
     state: &mut AppState,
-    backend: &dyn DownloadBackend,
+    backend: &Arc<dyn DownloadBackend>,
     history: &mut HistoryStore,
 ) {
     match key.code {

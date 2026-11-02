@@ -8,7 +8,11 @@ use crate::{
 };
 use crossterm::event::{self, Event};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, sync::mpsc::Receiver, time::Duration};
+use std::{
+    io,
+    sync::{Arc, mpsc::Receiver},
+    time::Duration,
+};
 mod keyboard;
 mod state;
 use state::LoopState;
@@ -19,7 +23,7 @@ pub(super) fn run(
     state: &mut AppState,
     updates: &Receiver<MonitorUpdate>,
     managed_mode: bool,
-    backend: &dyn DownloadBackend,
+    backend: &Arc<dyn DownloadBackend>,
     history: &mut HistoryStore,
 ) -> Result<ExitChoice, String> {
     let mut ui = LoopState::new();

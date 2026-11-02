@@ -8,13 +8,14 @@ use crate::{
     ui::{ExitChoice, PendingRemoval},
 };
 use crossterm::event::{KeyCode, KeyEvent};
+use std::sync::Arc;
 
 pub(super) fn handle(
     key: KeyEvent,
     ui: &mut LoopState,
     state: &mut AppState,
     managed_mode: bool,
-    backend: &dyn DownloadBackend,
+    backend: &Arc<dyn DownloadBackend>,
     history: &mut HistoryStore,
 ) -> Option<ExitChoice> {
     match key.code {

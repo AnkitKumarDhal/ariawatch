@@ -24,7 +24,7 @@ pub struct FileDeleteReport {
     pub failed_files: usize,
 }
 
-pub trait DownloadBackend {
+pub trait DownloadBackend: Send + Sync {
     fn get_version(&self) -> Result<String, String>;
     fn fetch_snapshot(&self) -> Result<DownloadSnapshot, String>;
     fn start_monitor(
