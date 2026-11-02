@@ -128,6 +128,59 @@ pub fn add_uri(endpoint: &str, uri: &str, rpc_secret: Option<&str>) -> Result<St
     expect_gid(result, "aria2.addUri")
 }
 
+// this one adds a magnet uri and pauses the torrent that comes after fetching the metadata
+pub fn add_magnet_for_selection(
+    endpoint: &str,
+    uri: &str,
+    rpc_secret: Option<&str>,
+) -> Result<String, String> {
+    let request = build_add_magnet_request(uri, rpc_secret)?;
+    let body = send_rpc_request(endpoint, &request)?;
+    let response = parse_rpc_response(&body)?;
+    let result = response.into_result("ariawatch-1")?;
+
+    expect_gid(result, "aria2.addUri")
+}
+
+// this one adds a local torrent file for file selection, in a paused state
+pub fn add_paused_torrent_file(
+    endpoint: &str,
+    path: &Path,
+    rpc_secret: Option<&str>,
+) -> Result<String, String> {
+    let is_torrent = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"));
+
+    if !is_torrent {
+        return Err(String::from("Select a local .torrent file"));
+    }
+
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("Could not inspect torrent file {}: {error}", path.display()))?;
+
+    if !metadata.is_file() {
+        return Err(String::from("Torrent path is not a regular file "));
+    }
+
+    if metadata.len() == 0 || metadata.len() > MAX_TORRENT_BYTES {
+        return Err(String::from(
+            "Torrent file must be non-empty and no larger than 1.4MB",
+        ));
+    }
+
+    let contents = fs::read(path)
+        .map_err(|error| format!("Could not read torrent file {}: {error}", path.display()))?;
+
+    let request = build_add_paused_torrent_request(&contents, rpc_secret)?;
+    let body = send_rpc_request(endpoint, &request)?;
+    let response = parse_rpc_response(&body)?;
+    let result = response.into_result("ariawatch-1")?;
+
+    expect_gid(result, "aria2.addTorrent")
+}
+
 // does the same as above but with .torrent files
 pub fn add_torrent_file(
     endpoint: &str,
