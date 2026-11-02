@@ -98,6 +98,46 @@ impl DownloadBackend for ExternalAria2Backend {
         )
     }
 
+    fn add_magnet_for_selection(&self, uri: &str) -> Result<String, String> {
+        aria2::add_magnet_for_selection(
+            &self.config.rpc_url,
+            uri,
+            self.config.rpc_secret.as_deref(),
+        )
+    }
+
+    fn add_paused_torrent_file(&self, path: &Path) -> Result<String, String> {
+        aria2::add_paused_torrent_file(
+            &self.config.rpc_url,
+            path,
+            self.config.rpc_secret.as_deref(),
+        )
+    }
+
+    fn get_torrent_metadata_status(
+        &self,
+        gid: &str,
+    ) -> Result<aria2::TorrentMetadataStatus, String> {
+        aria2::get_torrent_metadata_status(
+            &self.config.rpc_url,
+            gid,
+            self.config.rpc_secret.as_deref(),
+        )
+    }
+
+    fn get_torrent_files(&self, gid: &str) -> Result<Vec<aria2::TorrentFile>, String> {
+        aria2::get_torrent_files(&self.config.rpc_url, gid, self.config.rpc_secret.as_deref())
+    }
+
+    fn set_torrent_file_selection(&self, gid: &str, indices: &[u32]) -> Result<(), String> {
+        aria2::set_torrent_file_selection(
+            &self.config.rpc_url,
+            gid,
+            indices,
+            self.config.rpc_secret.as_deref(),
+        )
+    }
+
     fn pause_download(&self, gid: &str) -> Result<(), String> {
         aria2::pause_download(&self.config.rpc_url, gid, self.config.rpc_secret.as_deref())
     }

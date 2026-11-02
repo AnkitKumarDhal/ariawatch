@@ -1,6 +1,7 @@
 mod file_safety;
 mod rpc;
 use crate::{
+    aria2::{TorrentFile, TorrentMetadataStatus},
     config::{DEFAULT_RPC_URL, ExternalServerConfig, RuntimeConfig, RuntimeMode},
     controller,
     domain::{download::Download, status::Status},
@@ -33,6 +34,13 @@ pub trait DownloadBackend {
 
     fn add_uri(&self, uri: &str) -> Result<String, String>;
     fn add_torrent_file(&self, path: &Path) -> Result<String, String>;
+
+    fn add_magnet_for_selection(&self, uri: &str) -> Result<String, String>;
+    fn add_paused_torrent_file(&self, path: &Path) -> Result<String, String>;
+
+    fn get_torrent_metadata_status(&self, gid: &str) -> Result<TorrentMetadataStatus, String>;
+    fn get_torrent_files(&self, gid: &str) -> Result<Vec<TorrentFile>, String>;
+    fn set_torrent_file_selection(&self, gid: &str, indices: &[u32]) -> Result<(), String>;
 
     fn pause_download(&self, gid: &str) -> Result<(), String>;
     fn resume_download(&self, gid: &str) -> Result<(), String>;
