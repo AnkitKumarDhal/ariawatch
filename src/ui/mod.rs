@@ -1,6 +1,7 @@
 // Renders the actual UI and terminal input
 mod dialogs;
 mod event_loop;
+mod formatting;
 mod render;
 use crate::{
     app_state::AppState, aria2::TorrentFile, backend::DownloadBackend, domain::status::Status,

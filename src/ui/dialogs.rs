@@ -1,5 +1,7 @@
-use super::render::format_bytes;
-use crate::{history::HistoryEntry, ui::TorrentSelection};
+use crate::{
+    history::HistoryEntry,
+    ui::{TorrentSelection, formatting::format_bytes},
+};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},

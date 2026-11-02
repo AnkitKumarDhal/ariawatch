@@ -1,5 +1,7 @@
-use super::formatting::{format_bytes, format_duration};
-use crate::app_state::AppState;
+use crate::{
+    app_state::AppState,
+    ui::formatting::{format_bytes, format_duration},
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},

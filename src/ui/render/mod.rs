@@ -1,7 +1,5 @@
 mod download_table;
 mod footer;
-mod formatting;
-pub(super) use formatting::format_bytes;
 mod header;
 mod more_info;
 use super::{
