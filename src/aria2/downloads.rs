@@ -15,6 +15,7 @@ struct Aria2UriResponse {
 
 // Represents a file entry in an aria2 response
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Aria2FileResponse {
     pub path: String,
     pub length: Option<String>,
