@@ -115,6 +115,23 @@ pub(super) fn handle(
             ui.redraw_needed = true;
         }
 
+        KeyCode::Char('f') => {
+            match state.selected_download() {
+                Some(download) if !download.files.is_empty() => {
+                    ui.show_file_list = true;
+                    ui.file_list_selection = 0;
+                }
+
+                Some(_) => {
+                    ui.status_message = String::from("No file entries available for this download");
+                }
+
+                None => ui.status_message = String::from("No download selected"),
+            }
+
+            ui.redraw_needed = true;
+        }
+
         KeyCode::Char('h') => {
             match history.list_recent(100) {
                 Ok(entries) => {

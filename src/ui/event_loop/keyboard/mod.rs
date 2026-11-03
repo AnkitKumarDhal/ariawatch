@@ -11,6 +11,7 @@ use crate::{
 use crossterm::event::{KeyEvent, KeyEventKind};
 mod add_input;
 mod exit_dialog;
+mod file_list;
 mod history;
 mod normal;
 mod removal;
@@ -39,6 +40,8 @@ pub(super) fn handle_key(
         add_input::handle(key, ui, backend, torrent_worker);
     } else if ui.show_exit_dialog {
         return exit_dialog::handle(key, ui);
+    } else if ui.show_file_list {
+        file_list::handle(key, ui, state);
     } else {
         return normal::handle(key, ui, state, managed_mode, backend, history);
     }

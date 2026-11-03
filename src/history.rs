@@ -388,6 +388,7 @@ mod tests {
             downloaded,
             speed: 128,
             status,
+            files: Vec::new(),
             directory: Some(String::from("/home/test/Downloads")),
             source_url: Some(String::from("https://example.com/file.zip")),
             error_message: None,

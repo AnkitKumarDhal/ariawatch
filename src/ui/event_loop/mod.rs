@@ -182,6 +182,8 @@ pub(super) fn run(
                             history_selection: ui.history_selection,
                             torrent_selection: ui.pending_torrent_selection.as_ref(),
                             torrent_preparation: ui.pending_torrent_preparation.as_ref(),
+                            show_file_list: ui.show_file_list,
+                            file_list_selection: ui.file_list_selection,
                         },
                     )
                 })

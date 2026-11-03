@@ -14,6 +14,8 @@ pub(super) struct LoopState {
     pub(super) pending_removal: Option<PendingRemoval>,
     pub(super) history_view: Option<Vec<HistoryEntry>>,
     pub(super) history_selection: usize,
+    pub(super) show_file_list: bool,
+    pub(super) file_list_selection: usize,
 }
 
 impl LoopState {
@@ -29,6 +31,8 @@ impl LoopState {
             pending_removal: None,
             history_view: None,
             history_selection: 0,
+            show_file_list: false,
+            file_list_selection: 0,
         }
     }
 }

@@ -13,9 +13,9 @@ pub(super) fn draw(
     managed_mode: bool,
 ) {
     let exit_hint = if managed_mode {
-        "a:add h:history p:pause r:resume P/R:all x:remove X:delete+remove q: exit options"
+        "a:add h:history f:files p:pause r:resume P/R:all x:remove X:delete+remove q: exit options"
     } else {
-        "a:add h:history p:pause r:resume P/R:all x:remove X:managed only q: quit"
+        "a:add h:history f:files p:pause r:resume P/R:all x:remove X:managed only q: quit"
     };
 
     let footer = Paragraph::new(format!(

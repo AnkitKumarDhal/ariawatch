@@ -12,7 +12,7 @@ use super::{
 use crate::{
     app_state::AppState,
     history::HistoryEntry,
-    ui::{TorrentPreparation, TorrentSelection},
+    ui::{TorrentPreparation, TorrentSelection, dialogs::draw_download_files_dialog},
 };
 use ratatui::{
     Frame,
@@ -31,6 +31,8 @@ pub(super) struct DrawContext<'a> {
     pub(super) history_selection: usize,
     pub(super) torrent_selection: Option<&'a TorrentSelection>,
     pub(super) torrent_preparation: Option<&'a TorrentPreparation>,
+    pub(super) show_file_list: bool,
+    pub(super) file_list_selection: usize,
 }
 
 // public function to draw the TUI
@@ -47,6 +49,8 @@ pub(super) fn draw(frame: &mut Frame<'_>, context: DrawContext<'_>) {
         history_selection,
         torrent_selection,
         torrent_preparation,
+        show_file_list,
+        file_list_selection,
     } = context;
 
     // 4 sections for the TUI
@@ -90,5 +94,9 @@ pub(super) fn draw(frame: &mut Frame<'_>, context: DrawContext<'_>) {
 
     if let Some(preparation) = torrent_preparation {
         draw_torrent_prep_dialog(frame, preparation);
+    }
+
+    if show_file_list && let Some(download) = state.selected_download() {
+        draw_download_files_dialog(frame, download, file_list_selection);
     }
 }

@@ -209,6 +209,7 @@ mod tests {
             downloaded: 0,
             speed: 0,
             status: Status::Waiting,
+            files: Vec::new(),
             directory: None,
             source_url: None,
             error_message: None,

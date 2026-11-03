@@ -1,4 +1,7 @@
+use std::path::Path;
+
 use crate::{
+    domain::download::Download,
     history::HistoryEntry,
     ui::{
         TorrentPreparation, TorrentPreparationSource, TorrentSelection,
@@ -304,7 +307,7 @@ pub(super) fn draw_torrent_selection_dialog(frame: &mut Frame<'_>, selection: &T
         ],
     )
     .header(
-        Row::new(["File", "Size", "Completed"])
+        Row::new(["    File", "Size", "Completed"])
             .style(Style::default().add_modifier(Modifier::BOLD)),
     )
     .column_spacing(1);
@@ -375,4 +378,102 @@ pub(super) fn draw_torrent_prep_dialog(frame: &mut Frame<'_>, preparation: &Torr
     );
 
     frame.render_widget(dialog, area);
+}
+
+// now this one is an interesting one though,,, like you see, a torrent has multiple files, but
+// showing them all directly inside the downloads list is tedious and would make it confusing when
+// there are other entries in the list too,,, so the torrent shows up as just one entry with a
+// little arrow to its left, and pressing [f] on it would open a dialog that shows all the files.
+pub(super) fn draw_download_files_dialog(
+    frame: &mut Frame<'_>,
+    download: &Download,
+    selected_index: usize,
+) {
+    let area = centered_rect(88, 80, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = format!(
+        " Download Files: {} ({}) ",
+        download.name,
+        download.files.len()
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_alignment(Alignment::Center);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+
+    if download.files.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No file entries were reported by aria2"),
+            sections[0],
+        );
+        frame.render_widget(
+            Paragraph::new("f / Esc: clone").alignment(Alignment::Center),
+            sections[1],
+        );
+        return;
+    }
+
+    let selected_index = selected_index.min(download.files.len() - 1);
+    let visible_rows = sections[0].height.saturating_sub(1).max(1) as usize;
+    let first_visible_index = selected_index
+        .saturating_add(1)
+        .saturating_sub(visible_rows);
+
+    let rows = download
+        .files
+        .iter()
+        .enumerate()
+        .skip(first_visible_index)
+        .take(visible_rows)
+        .map(|(index, file)| {
+            let path = Path::new(&file.path);
+            let displayed_path = download
+                .directory
+                .as_deref()
+                .and_then(|directory| path.strip_prefix(directory).ok())
+                .unwrap_or(path);
+
+            let row = Row::new(vec![
+                Cell::from(displayed_path.display().to_string()),
+                Cell::from(format_bytes(file.size)),
+                Cell::from(format_bytes(file.downloaded)),
+            ]);
+
+            if index == selected_index {
+                row.style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+            } else {
+                row
+            }
+        });
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(66),
+            Constraint::Percentage(17),
+            Constraint::Percentage(17),
+        ],
+    )
+    .header(
+        Row::new(["    File", "Size", "Downloaded"])
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+    )
+    .column_spacing(1);
+
+    frame.render_widget(table, sections[0]);
+
+    frame.render_widget(
+        Paragraph::new("↑/↓ or j/k: navigate  ·  f/Esc: close").alignment(Alignment::Center),
+        sections[1],
+    );
 }

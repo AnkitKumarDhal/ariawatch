@@ -1,5 +1,8 @@
 use super::rpc::{build_rpc_request, parse_rpc_response, send_rpc_request};
-use crate::domain::{download::Download, status::Status};
+use crate::domain::{
+    download::{Download, DownloadFile},
+    status::Status,
+};
 use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
 
@@ -14,6 +17,8 @@ struct Aria2UriResponse {
 #[derive(Debug, Deserialize)]
 struct Aria2FileResponse {
     pub path: String,
+    pub length: Option<String>,
+    pub completed_length: Option<String>,
     #[serde(default)]
     pub uris: Vec<Aria2UriResponse>,
 }
@@ -65,6 +70,26 @@ impl Aria2DownloadResponse {
             .or_else(|| self.files.iter().flat_map(|file| file.uris.iter()).next())
             .map(|uri| uri.uri.clone());
 
+        let mut files = Vec::with_capacity(self.files.len());
+
+        for file in self.files {
+            let size = match file.length.as_deref() {
+                Some(value) => parse_u64_field("file length", value)?,
+                None => 0,
+            };
+
+            let downloaded = match file.completed_length.as_deref() {
+                Some(value) => parse_u64_field("file completedLength", value)?,
+                None => 0,
+            };
+
+            files.push(DownloadFile {
+                path: file.path,
+                size,
+                downloaded,
+            });
+        }
+
         let total_length = parse_u64_field("totalLength", &self.total_length)?;
         let completed_length = parse_u64_field("completedLength", &self.completed_length)?;
         let download_speed = parse_u64_field("downloadSpeed", &self.download_speed)?;
@@ -77,6 +102,7 @@ impl Aria2DownloadResponse {
             downloaded: completed_length,
             speed: download_speed,
             status,
+            files,
             directory: self.dir,
             source_url,
             error_message: self.error_message,
@@ -220,4 +246,57 @@ pub fn fetch_all_downloads(
         merge_download_pages(active_downloads, waiting_downloads, stopped_downloads);
 
     Ok((active_count, waiting_count, stopped_count, all_downloads))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Aria2DownloadResponse;
+    use crate::domain::download::DownloadFile;
+
+    #[test]
+    fn preserves_all_files_from_aria2_response() {
+        let response: Aria2DownloadResponse = serde_json::from_value(serde_json::json!({
+            "gid": "0123456789abcdef",
+            "status": "active",
+            "totalLength": "3072",
+            "completedLength": "1024",
+            "downloadSpeed": "128",
+            "dir": "/home/test/Downloads",
+            "files": [
+                {
+                    "path": "/home/test/Downloads/Example/one.mkv",
+                    "length": "1024",
+                    "completedLength": "512",
+                    "uris": []
+                },
+                {
+                    "path": "/home/test/Downloads/Example/two.mkv",
+                    "length": "2048",
+                    "completedLength": "512",
+                    "uris": []
+                }
+            ]
+        }))
+        .unwrap();
+
+        let download = response.into_download().unwrap();
+
+        assert_eq!(download.files.len(), 2);
+
+        assert_eq!(
+            download.files,
+            vec![
+                DownloadFile {
+                    path: String::from("/home/test/Downloads/Example/one.mkv"),
+                    size: 1024,
+                    downloaded: 512,
+                },
+                DownloadFile {
+                    path: String::from("/home/test/Downloads/Example/two.mkv"),
+                    size: 2048,
+                    downloaded: 512,
+                },
+            ]
+        );
+    }
 }

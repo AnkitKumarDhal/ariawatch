@@ -1,7 +1,15 @@
 // Defines download data and progress calculations
 use crate::domain::status::Status;
 
-// Normalized information about one download
+// information about one file belonging to a download (feels like i'm in an english class lmao)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadFile {
+    pub path: String,
+    pub size: u64,
+    pub downloaded: u64,
+}
+
+// Normalized information about one download (updated to be a collection of DownloadFile's)
 #[derive(Debug, PartialEq)]
 pub struct Download {
     pub gid: String,
@@ -10,6 +18,7 @@ pub struct Download {
     pub downloaded: u64,
     pub speed: u64,
     pub status: Status,
+    pub files: Vec<DownloadFile>,
     pub directory: Option<String>,
     pub source_url: Option<String>,
     pub error_message: Option<String>,
@@ -58,6 +67,7 @@ mod tests {
             downloaded,
             speed: 0,
             status: Status::Active,
+            files: Vec::new(),
             directory: None,
             source_url: None,
             error_message: None,

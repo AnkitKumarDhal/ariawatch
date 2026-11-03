@@ -42,11 +42,17 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
             let is_selected = Some(download.gid.as_str()) == selected_gid;
 
+            let download_name = if download.files.len() > 1 {
+                format!("{} ({} files)", download.name, download.files.len())
+            } else {
+                download.name.clone()
+            };
+
             // this is the cursor hehe
             let name = if is_selected {
-                format!("▶ {}", download.name)
+                format!("▶ {download_name}")
             } else {
-                format!("  {}", download.name)
+                format!("  {download_name}")
             };
 
             let row = Row::new(vec![
