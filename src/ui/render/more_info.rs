@@ -68,7 +68,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
             details.extend([
                 Line::from(format!(
-                    "Download: {}/s  |  Upload: {}/s",
+                    "Download: {}/s  |  Upload: {}",
                     format_bytes(download.speed),
                     upload_speed
                 )),
