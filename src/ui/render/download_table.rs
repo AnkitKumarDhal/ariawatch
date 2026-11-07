@@ -1,4 +1,4 @@
-use crate::{app_state::AppState, ui::formatting::format_bytes};
+use crate::{app_state::AppState, domain::status::Status, ui::formatting::format_bytes};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -37,7 +37,16 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 None => String::from("N/A"),
             };
 
-            let speed = format!("{}/s", format_bytes(download.speed));
+            let speed = if download.status == Status::Seeding {
+                download
+                    .torrent
+                    .as_ref()
+                    .and_then(|torrent| torrent.upload_speed)
+                    .map(|speed| format!("UL {}/s", format_bytes(speed)))
+                    .unwrap_or_else(|| String::from("UL N/A"))
+            } else {
+                format!("{}/s", format_bytes(download.speed))
+            };
             let remaining = format_bytes(download.remaining_bytes());
 
             let is_selected = Some(download.gid.as_str()) == selected_gid;

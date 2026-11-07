@@ -1,6 +1,6 @@
 use super::rpc::{build_rpc_request, parse_rpc_response, send_rpc_request};
 use crate::domain::{
-    download::{Download, DownloadFile},
+    download::{Download, DownloadFile, TorrentStats},
     status::Status,
 };
 use serde::Deserialize;
@@ -40,12 +40,37 @@ pub struct Aria2DownloadResponse {
 
     #[serde(default)]
     error_message: Option<String>,
+
+    #[serde(default)]
+    upload_length: Option<String>,
+
+    #[serde(default)]
+    upload_speed: Option<String>,
+
+    #[serde(default)]
+    info_hash: Option<String>,
+
+    #[serde(default)]
+    num_seeders: Option<String>,
+
+    #[serde(default)]
+    seeder: Option<String>,
+
+    #[serde(default)]
+    connections: Option<String>,
 }
 
 fn parse_u64_field(field_name: &str, value: &str) -> Result<u64, String> {
     value
         .parse::<u64>()
         .map_err(|error| format!("Invalid string for {field_name}: {error}"))
+}
+
+// parses an optional numeric field without treating missing values as 0
+fn parse_optional_u64_field(field_name: &str, value: Option<&str>) -> Result<Option<u64>, String> {
+    value
+        .map(|value| parse_u64_field(field_name, value))
+        .transpose()
 }
 
 fn parse_download_list(value: serde_json::Value) -> Result<Vec<Aria2DownloadResponse>, String> {
@@ -94,7 +119,42 @@ impl Aria2DownloadResponse {
         let total_length = parse_u64_field("totalLength", &self.total_length)?;
         let completed_length = parse_u64_field("completedLength", &self.completed_length)?;
         let download_speed = parse_u64_field("downloadSpeed", &self.download_speed)?;
-        let status = Status::from_aria2(&self.status)?;
+
+        let torrent = match self.info_hash.as_deref() {
+            Some(_) => {
+                let seeders = parse_optional_u64_field("numSeeders", self.num_seeders.as_deref())?;
+
+                let connections =
+                    parse_optional_u64_field("connections", self.connections.as_deref())?;
+
+                let peers = connections
+                    .zip(seeders)
+                    .map(|(connections, seeders)| connections.saturating_sub(seeders));
+
+                Some(TorrentStats {
+                    seeders,
+                    peers,
+                    upload_speed: parse_optional_u64_field(
+                        "uploadSpeed",
+                        self.upload_speed.as_deref(),
+                    )?,
+                    uploaded: parse_optional_u64_field(
+                        "uploadLength",
+                        self.upload_length.as_deref(),
+                    )?,
+                })
+            }
+            None => None,
+        };
+
+        let status = if self.status == "active"
+            && torrent.is_some()
+            && self.seeder.as_deref() == Some("true")
+        {
+            Status::Seeding
+        } else {
+            Status::from_aria2(&self.status)?
+        };
 
         Ok(Download {
             gid: self.gid,
@@ -104,6 +164,7 @@ impl Aria2DownloadResponse {
             speed: download_speed,
             status,
             files,
+            torrent,
             directory: self.dir,
             source_url,
             error_message: self.error_message,
@@ -119,6 +180,12 @@ fn download_keys() -> serde_json::Value {
         "totalLength",
         "completedLength",
         "downloadSpeed",
+        "uploadLength",
+        "uploadSpeed",
+        "infoHash",
+        "numSeeders",
+        "seeder",
+        "connections",
         "files",
         "dir",
         "errorMessage"
@@ -252,7 +319,7 @@ pub fn fetch_all_downloads(
 #[cfg(test)]
 mod tests {
     use super::Aria2DownloadResponse;
-    use crate::domain::download::DownloadFile;
+    use crate::domain::{download::DownloadFile, status::Status};
 
     #[test]
     fn preserves_all_files_from_aria2_response() {
@@ -299,5 +366,77 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn identifies_a_seeding_torrent_and_preserves_its_statistics() {
+        let response: Aria2DownloadResponse = serde_json::from_value(serde_json::json!({
+            "gid": "0123456789abcdef",
+            "status": "active",
+            "totalLength": "1048576",
+            "completedLength": "1048576",
+            "downloadSpeed": "0",
+            "uploadLength": "524288",
+            "uploadSpeed": "4096",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567",
+            "numSeeders": "3",
+            "seeder": "true",
+            "connections": "10",
+            "files": []
+        }))
+        .unwrap();
+
+        let download = response.into_download().unwrap();
+
+        assert_eq!(download.status, Status::Seeding);
+
+        let torrent = download.torrent.unwrap();
+
+        assert_eq!(torrent.seeders, Some(3));
+        assert_eq!(torrent.peers, Some(7));
+        assert_eq!(torrent.upload_speed, Some(4096));
+        assert_eq!(torrent.uploaded, Some(524288));
+    }
+
+    #[test]
+    fn downloading_torrent_remains_active() {
+        let response: Aria2DownloadResponse = serde_json::from_value(serde_json::json!({
+            "gid": "0123456789abcdef",
+            "status": "active",
+            "totalLength": "1048576",
+            "completedLength": "524288",
+            "downloadSpeed": "1024",
+            "uploadLength": "1024",
+            "uploadSpeed": "256",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567",
+            "numSeeders": "2",
+            "seeder": "false",
+            "connections": "8",
+            "files": []
+        }))
+        .unwrap();
+
+        let download = response.into_download().unwrap();
+
+        assert_eq!(download.status, Status::Active);
+        assert_eq!(download.torrent.as_ref().unwrap().peers, Some(6));
+    }
+
+    #[test]
+    fn non_torrent_download_does_not_get_torrent_statistics() {
+        let response: Aria2DownloadResponse = serde_json::from_value(serde_json::json!({
+            "gid": "0123456789abcdef",
+            "status": "active",
+            "totalLength": "1000",
+            "completedLength": "500",
+            "downloadSpeed": "128",
+            "files": []
+        }))
+        .unwrap();
+
+        let download = response.into_download().unwrap();
+
+        assert_eq!(download.status, Status::Active);
+        assert!(download.torrent.is_none());
     }
 }

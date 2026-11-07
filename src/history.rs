@@ -194,7 +194,7 @@ impl HistoryStore {
             .collect();
 
         let candidates = {
-            let mut statement = self.connection.prepare("SELECT gid FROM download_history WHERE status IN ('Downloading', 'Queued', 'Paused')").map_err(|error| {format!("Could not prepare for history reconcilation: {error}")})?;
+            let mut statement = self.connection.prepare("SELECT gid FROM download_history WHERE status IN ('Downloading', 'Seeding', 'Queued', 'Paused')").map_err(|error| {format!("Could not prepare for history reconcilation: {error}")})?;
 
             let rows = statement
                 .query_map([], |row| row.get::<_, String>(0))
@@ -226,7 +226,7 @@ impl HistoryStore {
                         speed_bytes_per_second = 0,
                         error_message = 'Not present in the current aria2 snapshot'
                     WHERE gid = ?1
-                        AND status IN ('Downloading', 'Queued', 'Paused')
+                        AND status IN ('Downloading', 'Seeding', 'Queued', 'Paused')
                     ",
                     params![gid],
                 )
@@ -389,6 +389,7 @@ mod tests {
             speed: 128,
             status,
             files: Vec::new(),
+            torrent: None,
             directory: Some(String::from("/home/test/Downloads")),
             source_url: Some(String::from("https://example.com/file.zip")),
             error_message: None,

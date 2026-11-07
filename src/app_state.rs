@@ -210,6 +210,7 @@ mod tests {
             speed: 0,
             status: Status::Waiting,
             files: Vec::new(),
+            torrent: None,
             directory: None,
             source_url: None,
             error_message: None,

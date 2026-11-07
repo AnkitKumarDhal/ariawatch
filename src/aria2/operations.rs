@@ -320,7 +320,7 @@ pub fn remove_download(
     validate_gid(gid)?;
 
     match status {
-        Status::Active => {
+        Status::Active | Status::Seeding => {
             let result = call_rpc_method(
                 endpoint,
                 "aria2.remove",

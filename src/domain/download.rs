@@ -9,6 +9,15 @@ pub struct DownloadFile {
     pub downloaded: u64,
 }
 
+// torrent-specific information reported by aria2
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TorrentStats {
+    pub seeders: Option<u64>,
+    pub peers: Option<u64>,
+    pub upload_speed: Option<u64>,
+    pub uploaded: Option<u64>,
+}
+
 // Normalized information about one download (updated to be a collection of DownloadFile's)
 #[derive(Debug, PartialEq)]
 pub struct Download {
@@ -19,6 +28,7 @@ pub struct Download {
     pub speed: u64,
     pub status: Status,
     pub files: Vec<DownloadFile>,
+    pub torrent: Option<TorrentStats>,
     pub directory: Option<String>,
     pub source_url: Option<String>,
     pub error_message: Option<String>,
@@ -68,6 +78,7 @@ mod tests {
             speed: 0,
             status: Status::Active,
             files: Vec::new(),
+            torrent: None,
             directory: None,
             source_url: None,
             error_message: None,

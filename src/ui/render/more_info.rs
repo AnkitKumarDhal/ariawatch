@@ -1,5 +1,6 @@
 use crate::{
     app_state::AppState,
+    domain::status::Status,
     ui::formatting::{format_bytes, format_duration},
 };
 use ratatui::{
@@ -27,11 +28,17 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         .split(details_inner);
 
     if let Some(download) = selected_download {
+        let eta = if download.status == Status::Seeding {
+            String::from("-")
+        } else {
+            format_duration(download.estimated_remaining_seconds())
+        };
+
         let mut details = vec![
             Line::from(format!(
                 "Status: {}  |  ETA: {}",
                 download.status.label(),
-                format_duration(download.estimated_remaining_seconds())
+                eta
             )),
             Line::from(format!(
                 "Downloaded: {} / {}  |  Remaining: {}",
@@ -39,7 +46,43 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 format_bytes(download.size),
                 format_bytes(download.remaining_bytes())
             )),
-            Line::from(format!("Speed: {}/s", format_bytes(download.speed))),
+        ];
+
+        if let Some(torrent) = &download.torrent {
+            let upload_speed = torrent
+                .upload_speed
+                .map(|speed| format!("{}/s", format_bytes(speed)))
+                .unwrap_or_else(|| String::from("N/A"));
+            let uploaded = torrent
+                .uploaded
+                .map(format_bytes)
+                .unwrap_or_else(|| String::from("N/A"));
+            let seeders = torrent
+                .seeders
+                .map(|count| count.to_string())
+                .unwrap_or_else(|| String::from("N/A"));
+            let peers = torrent
+                .peers
+                .map(|count| count.to_string())
+                .unwrap_or_else(|| String::from("N/A"));
+
+            details.extend([
+                Line::from(format!(
+                    "Download: {}/s  |  Upload: {}/s",
+                    format_bytes(download.speed),
+                    upload_speed
+                )),
+                Line::from(format!("Uploaded: {}", uploaded)),
+                Line::from(format!("Seeders: {}  |  Peers: {}", seeders, peers)),
+            ]);
+        } else {
+            details.push(Line::from(format!(
+                "Speed: {}/s",
+                format_bytes(download.speed)
+            )));
+        }
+
+        details.extend([
             Line::from(format!(
                 "Destination: {}",
                 download.directory.as_deref().unwrap_or("N/A")
@@ -48,7 +91,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 "Source URI: {}",
                 download.source_url.as_deref().unwrap_or("N/A")
             )),
-        ];
+        ]);
 
         if let Some(error) = download
             .error_message

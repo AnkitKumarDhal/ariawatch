@@ -53,13 +53,23 @@ pub(super) fn draw(frame: &mut Frame<'_>, context: DrawContext<'_>) {
         file_list_selection,
     } = context;
 
+    // different heights for torrent and normal DDLs
+    let info_height = if state
+        .selected_download()
+        .is_some_and(|download| download.torrent.is_some())
+    {
+        11
+    } else {
+        9
+    };
+
     // 4 sections for the TUI
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(9),
+            Constraint::Length(info_height),
             Constraint::Length(3),
         ])
         .split(frame.area());
