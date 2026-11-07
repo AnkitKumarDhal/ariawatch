@@ -213,8 +213,8 @@ mod tests {
         assert_eq!(
             safe_files,
             vec![
-                fs::canonicalize(&first_file).unwrap(),
                 fs::canonicalize(&second_file).unwrap(),
+                fs::canonicalize(&first_file).unwrap(),
             ]
         );
 

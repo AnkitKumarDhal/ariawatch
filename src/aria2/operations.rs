@@ -465,19 +465,11 @@ pub fn get_download_file_info(
     let status = call_rpc_method(
         endpoint,
         "aria2.tellStatus",
-        vec![serde_json::json!(gid), serde_json::json!(["gid", "files"])],
+        vec![serde_json::json!(gid), serde_json::json!(["dir", "files"])],
         rpc_secret,
     )?;
 
     parse_download_file_info(&status, "aria2.tellStatus")
-}
-
-pub fn get_download_file_paths(
-    endpoint: &str,
-    gid: &str,
-    rpc_secret: Option<&str>,
-) -> Result<Vec<PathBuf>, String> {
-    Ok(get_download_file_info(endpoint, gid, rpc_secret)?.paths)
 }
 
 #[cfg(test)]
