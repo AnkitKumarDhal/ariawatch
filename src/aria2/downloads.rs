@@ -24,6 +24,23 @@ struct Aria2FileResponse {
     pub uris: Vec<Aria2UriResponse>,
 }
 
+// this is the inner info dictionary of a torrent download
+#[derive(Debug, Deserialize)]
+struct Aria2BitTorrentInfoResponse {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+// this is the bittorrent metadata returned by aria2
+#[derive(Debug, Deserialize)]
+struct Aria2BitTorrentResponse {
+    #[serde(default)]
+    mode: Option<String>,
+
+    #[serde(default)]
+    info: Option<Aria2BitTorrentInfoResponse>,
+}
+
 // Represents download data returned by aria2
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +51,9 @@ pub struct Aria2DownloadResponse {
     completed_length: String,
     download_speed: String,
     files: Vec<Aria2FileResponse>,
+
+    #[serde(default)]
+    bittorrent: Option<Aria2BitTorrentResponse>,
 
     #[serde(default)]
     dir: Option<String>,
@@ -77,16 +97,59 @@ fn parse_download_list(value: serde_json::Value) -> Result<Vec<Aria2DownloadResp
     serde_json::from_value(value).map_err(|error| format!("Invalid aria2 download list: {error}"))
 }
 
+// finds the actual directory used by the multi-file torrents,,, aria2's dir is the base directory
+// and then the torrent directory is added to it
+fn resolve_torrent_dir(
+    base_dir: Option<&str>,
+    torrent_mode: Option<&str>,
+    files: &[DownloadFile],
+) -> Option<String> {
+    let base_dir = base_dir?;
+    if torrent_mode != Some("multi") {
+        return Some(base_dir.to_owned());
+    }
+
+    let base_path = Path::new(base_dir);
+
+    let torrent_dir = files.iter().find_map(|file| {
+        let relative_path = Path::new(&file.path).strip_prefix(base_path).ok()?;
+
+        match relative_path.components().next()? {
+            std::path::Component::Normal(component) => Some(component.to_os_string()),
+            _ => None,
+        }
+    })?;
+
+    Some(base_path.join(torrent_dir).to_string_lossy().into_owned())
+}
+
 impl Aria2DownloadResponse {
     // Converts aria2 response into AriaWatch's internal model
     pub fn into_download(self) -> Result<Download, String> {
-        let name = self
-            .files
-            .first()
-            .and_then(|file| Path::new(&file.path).file_name())
-            .and_then(|name| name.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| self.gid.clone());
+        // get the actual torrent name from the bittorrent data
+        let torrent_name = self
+            .bittorrent
+            .as_ref()
+            .and_then(|torrent| torrent.info.as_ref())
+            .and_then(|info| info.name.as_deref())
+            .filter(|name| !name.trim().is_empty())
+            .map(str::to_owned);
+
+        let torrent_mode = self
+            .bittorrent
+            .as_ref()
+            .and_then(|torrent| torrent.mode.as_deref());
+
+        // prefer torrent metadata name,,, fall back to the first file name for normal downlaods or
+        // when aria2 does not provide the torrent metadata
+        let name = torrent_name.unwrap_or_else(|| {
+            self.files
+                .first()
+                .and_then(|file| Path::new(&file.path).file_name())
+                .and_then(|name| name.to_str())
+                .map(String::from)
+                .unwrap_or_else(|| self.gid.clone())
+        });
 
         let source_url = self
             .files
@@ -156,6 +219,8 @@ impl Aria2DownloadResponse {
             Status::from_aria2(&self.status)?
         };
 
+        let directory = resolve_torrent_dir(self.dir.as_deref(), torrent_mode, &files).or(self.dir);
+
         Ok(Download {
             gid: self.gid,
             name,
@@ -165,7 +230,7 @@ impl Aria2DownloadResponse {
             status,
             files,
             torrent,
-            directory: self.dir,
+            directory,
             source_url,
             error_message: self.error_message,
         })
@@ -186,6 +251,7 @@ fn download_keys() -> serde_json::Value {
         "numSeeders",
         "seeder",
         "connections",
+        "bittorrent",
         "files",
         "dir",
         "errorMessage"
@@ -438,5 +504,79 @@ mod tests {
 
         assert_eq!(download.status, Status::Active);
         assert!(download.torrent.is_none());
+    }
+
+    #[test]
+    fn uses_torrent_metadata_name_and_directory_for_multi_file_torrents() {
+        let response: Aria2DownloadResponse = serde_json::from_value(serde_json::json!({
+            "gid": "0123456789abcdef",
+            "status": "active",
+            "totalLength": "3072",
+            "completedLength": "1024",
+            "downloadSpeed": "128",
+            "dir": "/home/test/Downloads",
+            "bittorrent": {
+                "mode": "multi",
+                "info": {
+                    "name": "Example Torrent"
+                }
+            },
+            "files": [
+                {
+                    "path": "/home/test/Downloads/Example Torrent/one.mkv",
+                    "length": "1024",
+                    "completedLength": "512",
+                    "uris": []
+                },
+                {
+                    "path": "/home/test/Downloads/Example Torrent/Disc 1/two.mkv",
+                    "length": "2048",
+                    "completedLength": "512",
+                    "uris": []
+                }
+            ]
+        }))
+        .unwrap();
+
+        let download = response.into_download().unwrap();
+
+        assert_eq!(download.name, "Example Torrent");
+
+        assert_eq!(
+            download.directory.as_deref(),
+            Some("/home/test/Downloads/Example Torrent")
+        );
+    }
+
+    #[test]
+    fn preserves_base_directory_for_single_file_torrents() {
+        let response: Aria2DownloadResponse = serde_json::from_value(serde_json::json!({
+            "gid": "0123456789abcdef",
+            "status": "active",
+            "totalLength": "1024",
+            "completedLength": "512",
+            "downloadSpeed": "128",
+            "dir": "/home/test/Downloads",
+            "bittorrent": {
+                "mode": "single",
+                "info": {
+                    "name": "Example.iso"
+                }
+            },
+            "files": [
+                {
+                    "path": "/home/test/Downloads/Example.iso",
+                    "length": "1024",
+                    "completedLength": "512",
+                    "uris": []
+                }
+            ]
+        }))
+        .unwrap();
+
+        let download = response.into_download().unwrap();
+
+        assert_eq!(download.name, "Example.iso");
+        assert_eq!(download.directory.as_deref(), Some("/home/test/Downloads"));
     }
 }
