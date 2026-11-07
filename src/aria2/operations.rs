@@ -316,6 +316,8 @@ fn remove_download_result(
 
 fn is_missing_download_result_error(error: &str, gid: &str) -> bool {
     error.contains(&format!("Could not remove download result of GID#{gid}"))
+        || error.contains(&format!("GID {gid} is not found"))
+        || error.contains(&format!("GID#{gid} is not found"))
 }
 
 pub fn remove_download(
@@ -327,28 +329,14 @@ pub fn remove_download(
     validate_gid(gid)?;
 
     match status {
-        Status::Active | Status::Seeding => {
+        Status::Active | Status::Seeding | Status::Waiting | Status::Paused => {
             let result = call_rpc_method(
                 endpoint,
                 "aria2.remove",
                 vec![serde_json::json!(gid)],
                 rpc_secret,
-            )?;
-
-            if result.as_str() != Some(gid) {
-                return Err(String::from("aria2.remove returned an unexpected result"));
-            }
-
-            remove_download_result(endpoint, gid, rpc_secret)
-        }
-
-        Status::Waiting | Status::Paused => {
-            let result = call_rpc_method(
-                endpoint,
-                "aria2.remove",
-                vec![serde_json::json!(gid)],
-                rpc_secret,
-            )?;
+            )
+            .map_err(|error| format!("aria2.remove failed for GID {gid}: {error}"))?;
 
             if result.as_str() != Some(gid) {
                 return Err(String::from("aria2.remove returned an unexpected result"));
@@ -467,7 +455,8 @@ pub fn get_download_file_info(
         "aria2.tellStatus",
         vec![serde_json::json!(gid), serde_json::json!(["dir", "files"])],
         rpc_secret,
-    )?;
+    )
+    .map_err(|error| format!("aria2.tellStatus failed for GID {gid}: {error}"))?;
 
     parse_download_file_info(&status, "aria2.tellStatus")
 }
@@ -665,5 +654,13 @@ mod control_tests {
                 "/mnt/storage/downloads/Example Torrent/Disc 1/video.mkv"
             )]
         );
+    }
+
+    #[test]
+    fn recognizes_generic_missing_download_result_error() {
+        let gid = "217badcbb15dd4ef";
+        let error = format!("aria2 rpc error 1: GID {gid} is not found");
+
+        assert!(is_missing_download_result_error(&error, gid));
     }
 }

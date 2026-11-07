@@ -62,6 +62,8 @@ impl ManagedAria2 {
             .arg(format!("--input-file={}", session_file.display()))
             .arg(format!("--save-session={}", session_file.display()))
             .arg("--save-session-interval=60")
+            .arg("--bt-save-metadata=true")
+            .arg("--bt-load-saved-metadata=true")
             .arg("--continue=true")
             .arg("--quiet=true")
             .arg("--summary-interval=0")
