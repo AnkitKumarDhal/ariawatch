@@ -174,13 +174,18 @@ impl DownloadBackend for ExternalAria2Backend {
             ));
         }
 
-        let directory = super::file_safety::managed_download_dir()?;
-        let file_paths = aria2::get_download_file_paths(
+        let file_info = aria2::get_download_file_info(
             &self.config.rpc_url,
             gid,
             self.config.rpc_secret.as_deref(),
         )?;
-        let safe_files = super::file_safety::collect_safe_files(file_paths, &directory)?;
+
+        let aria2::DownloadFileInfo {
+            directory: download_directory,
+            paths: file_paths,
+        } = file_info;
+
+        let safe_files = super::file_safety::collect_safe_files(file_paths, &download_directory)?;
 
         aria2::remove_download(
             &self.config.rpc_url,
@@ -209,7 +214,7 @@ impl DownloadBackend for ExternalAria2Backend {
         }
 
         if let Err(error) =
-            super::file_safety::remove_empty_parent_directories(&deleted_paths, &directory)
+            super::file_safety::remove_empty_parent_directories(&deleted_paths, &download_directory)
         {
             logging::error(&format!(
                 "Download files were deleted, but empty directory cleanup failed: {error}"

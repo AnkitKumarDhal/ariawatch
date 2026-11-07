@@ -3,31 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// managed controller starts aria2 with $HOME/Downloads as its directory
-pub(super) fn managed_download_dir() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .ok_or_else(|| String::from("Could not determine the home directory"))?;
-
-    let directory = home.join("Downloads");
-
-    let canonical = fs::canonicalize(&directory).map_err(|error| {
-        format!(
-            "Could not resolve managed download directory {}: {error}",
-            directory.display()
-        )
-    })?;
-
-    if !canonical.is_dir() {
-        return Err(String::from(
-            "Managed downlaod directory is not a directory",
-        ));
-    }
-
-    Ok(canonical)
-}
-
 // validate the files before deleting them
 pub(super) fn collect_safe_files(
     paths: Vec<PathBuf>,
@@ -210,12 +185,41 @@ pub(super) fn remove_empty_parent_directories(
 
 #[cfg(test)]
 mod tests {
-    use super::remove_empty_parent_directories;
+    use super::{collect_safe_files, remove_empty_parent_directories};
     use std::{
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn collects_nested_torrent_files_under_download_directory() {
+        let temp = create_test_directory("nested-torrent");
+        let downloads = temp.join("configured-downloads");
+
+        let torrent_directory = downloads.join("Example Torrent");
+        let nested_directory = torrent_directory.join("Disc 1");
+
+        let first_file = torrent_directory.join("cover.jpg");
+        let second_file = nested_directory.join("video.mkv");
+
+        fs::create_dir_all(&nested_directory).unwrap();
+        fs::write(&first_file, b"cover").unwrap();
+        fs::write(&second_file, b"video").unwrap();
+
+        let safe_files =
+            collect_safe_files(vec![first_file.clone(), second_file.clone()], &downloads).unwrap();
+
+        assert_eq!(
+            safe_files,
+            vec![
+                fs::canonicalize(&first_file).unwrap(),
+                fs::canonicalize(&second_file).unwrap(),
+            ]
+        );
+
+        fs::remove_dir_all(temp).unwrap();
+    }
 
     fn create_test_directory(name: &str) -> PathBuf {
         let timestamp = SystemTime::now()

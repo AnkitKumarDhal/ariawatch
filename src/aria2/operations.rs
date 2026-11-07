@@ -10,6 +10,13 @@ use std::{
 // to not hit these limits
 const MAX_TORRENT_BYTES: u64 = 1_400_000;
 
+// the actual dir and file paths reported by aria2 for *one* downlaod
+#[derive(Debug, PartialEq, Eq)]
+pub struct DownloadFileInfo {
+    pub directory: PathBuf,
+    pub paths: Vec<PathBuf>,
+}
+
 // does the request for adding a download link (even supports magnets)
 pub fn build_add_uri_request(uri: &str, rpc_secret: Option<&str>) -> Result<String, String> {
     let uri = uri.trim();
@@ -377,6 +384,20 @@ fn parse_download_file_paths(
         let object = file
             .as_object()
             .ok_or_else(|| format!("{source} returned a non-object entry for file {index}"))?;
+
+        // if there were files in the torrent downlaod that were specfically set to not be
+        // downloaded when starting the torrent download, this part makes sure that those
+        // "unselected" files are not indexed for deleting
+        let is_unselected = match object.get("selected") {
+            Some(serde_json::Value::String(selected)) => selected == "false",
+            Some(serde_json::Value::Bool(selected)) => !selected,
+            _ => false,
+        };
+
+        if is_unselected {
+            continue;
+        }
+
         let path_value = object.get("path").ok_or_else(|| {
             let fields = object.keys().map(|key| key.as_str()).collect::<Vec<_>>().join(", ");
             format!("{source} returned an invalid path for file {index}: missing `path` field (available fields: {fields})")
@@ -401,51 +422,68 @@ fn parse_download_file_paths(
     Ok(paths)
 }
 
+// extracts the download dir and selected file paths from aria2.tellStatus
+fn parse_download_file_info(
+    value: &serde_json::Value,
+    source: &str,
+) -> Result<DownloadFileInfo, String> {
+    let dir = value
+        .get("dir")
+        .and_then(serde_json::Value::as_str)
+        .filter(|directory| !directory.trim().is_empty())
+        .ok_or_else(|| format!("{source} returned an invalid or missing `dir` field"))?;
+
+    let dir = PathBuf::from(dir);
+
+    if !dir.is_absolute() {
+        return Err(format!(
+            "{source} returned a non-absolute download directory: {}",
+            dir.display()
+        ));
+    }
+
+    let files = value
+        .get("files")
+        .ok_or_else(|| format!("{source} returned no `files` field"))?;
+
+    let paths = parse_download_file_paths(files, &format!("{source}.files"))?;
+
+    Ok(DownloadFileInfo {
+        directory: dir,
+        paths,
+    })
+}
+
 // figures out the file path to be deleted
+pub fn get_download_file_info(
+    endpoint: &str,
+    gid: &str,
+    rpc_secret: Option<&str>,
+) -> Result<DownloadFileInfo, String> {
+    validate_gid(gid)?;
+
+    let status = call_rpc_method(
+        endpoint,
+        "aria2.tellStatus",
+        vec![serde_json::json!(gid), serde_json::json!(["gid", "files"])],
+        rpc_secret,
+    )?;
+
+    parse_download_file_info(&status, "aria2.tellStatus")
+}
+
 pub fn get_download_file_paths(
     endpoint: &str,
     gid: &str,
     rpc_secret: Option<&str>,
 ) -> Result<Vec<PathBuf>, String> {
-    validate_gid(gid)?;
-
-    let primary = call_rpc_method(
-        endpoint,
-        "aria2.getFiles",
-        vec![serde_json::json!(gid)],
-        rpc_secret,
-    )
-    .and_then(|value| parse_download_file_paths(&value, "aria2.getFiles"));
-
-    match primary {
-        Ok(paths) => Ok(paths),
-        Err(primary_error) => {
-            let fallback = call_rpc_method(
-                endpoint,
-                "aria2.tellStatus",
-                vec![serde_json::json!(gid)],
-                rpc_secret,
-            )
-            .and_then(|status| {
-                status
-                    .get("files")
-                    .cloned()
-                    .ok_or_else(|| String::from("aria2.tellStatus returned no `files` field"))
-            })
-            .and_then(|files| parse_download_file_paths(&files, "aria2.tellStatus.files"));
-
-            match fallback {
-                Ok(paths) => Ok(paths),
-                Err(fallback_error) => Err(format!(
-                    "Coult no retrieve file paths safely. aria2.getFiles failed: {primary_error}. aria2.tellStatus fallback failed: {fallback_error}"
-                )),
-            }
-        }
-    }
+    Ok(get_download_file_info(endpoint, gid, rpc_secret)?.paths)
 }
 
 #[cfg(test)]
 mod control_tests {
+    use crate::aria2::operations::parse_download_file_info;
+
     use super::{
         build_add_torrent_request, build_add_uri_request, is_missing_download_result_error,
         parse_download_file_paths, validate_gid,
@@ -602,5 +640,38 @@ mod control_tests {
         let error = "aria2 rpc error 1: Invalid GID";
 
         assert!(!is_missing_download_result_error(error, "ff30d62a336365b0"));
+    }
+
+    #[test]
+    fn parses_torrent_download_directory_and_selected_nested_files() {
+        let status = serde_json::json!({
+            "dir": "/mnt/storage/downloads",
+            "files": [
+                {
+                    "index": "1",
+                    "path": "/mnt/storage/downloads/Example Torrent/Disc 1/video.mkv",
+                    "selected": "true"
+                },
+                {
+                    "index": "2",
+                    "path": "/mnt/storage/downloads/Example Torrent/Disc 2/video.mkv",
+                    "selected": "false"
+                }
+            ]
+        });
+
+        let info = parse_download_file_info(&status, "aria2.tellStatus").unwrap();
+
+        assert_eq!(
+            info.directory,
+            std::path::PathBuf::from("/mnt/storage/downloads")
+        );
+
+        assert_eq!(
+            info.paths,
+            vec![std::path::PathBuf::from(
+                "/mnt/storage/downloads/Example Torrent/Disc 1/video.mkv"
+            )]
+        );
     }
 }
