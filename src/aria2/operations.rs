@@ -17,14 +17,12 @@ pub struct DownloadFileInfo {
     pub paths: Vec<PathBuf>,
 }
 
-// does the request for adding a download link (even supports magnets)
-pub fn build_add_uri_request(uri: &str, rpc_secret: Option<&str>) -> Result<String, String> {
+// validates a DD URI before submitting it to aria2 via the build_add_uri_request() function
+pub fn validate_download_uri(uri: &str) -> Result<(), String> {
     let uri = uri.trim();
-
     if uri.is_empty() || uri.chars().any(char::is_whitespace) {
         return Err(String::from("Download URI is empty or contains whitespace"));
     }
-
     let lower = uri.to_ascii_lowercase();
     let supported = [
         "http://", "https://", "ftp://", "ftps://", "sftp://", "magnet:?",
@@ -36,6 +34,13 @@ pub fn build_add_uri_request(uri: &str, rpc_secret: Option<&str>) -> Result<Stri
         ));
     }
 
+    Ok(())
+}
+
+// does the request for adding a download link (even supports magnets)
+pub fn build_add_uri_request(uri: &str, rpc_secret: Option<&str>) -> Result<String, String> {
+    let uri = uri.trim();
+    validate_download_uri(uri)?;
     build_rpc_request("aria2.addUri", vec![serde_json::json!([uri])], rpc_secret)
 }
 

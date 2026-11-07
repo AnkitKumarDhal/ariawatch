@@ -8,6 +8,7 @@ mod config;
 mod controller;
 mod domain;
 mod history;
+mod link_file;
 mod logging;
 mod monitor;
 mod paths;
