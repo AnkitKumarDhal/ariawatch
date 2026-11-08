@@ -4,7 +4,7 @@ use crate::{
     logging,
     ui::{
         TorrentPreparation, TorrentPreparationSource,
-        event_loop::{TorrentWorker, torrent_worker::TorrentSource},
+        event_loop::{LinkFileWorker, TorrentWorker, torrent_worker::TorrentSource},
     },
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -40,6 +40,18 @@ fn input_is_local_torrent(input: &str) -> bool {
             .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"))
 }
 
+// identifies plain-text files containing donwload links
+fn input_is_link_file(input: &str) -> bool {
+    Path::new(input)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("txt")
+                || extension.eq_ignore_ascii_case("links")
+                || extension.eq_ignore_ascii_case("list")
+        })
+}
+
 // queues torrent prep without making the keyboard handler wait for it
 fn queue_torrent_preparation(
     ui: &mut LoopState,
@@ -66,13 +78,15 @@ pub(super) fn handle(
     ui: &mut LoopState,
     backend: &dyn DownloadBackend,
     torrent_worker: &TorrentWorker,
+    link_file_worker: &LinkFileWorker,
 ) {
     match key.code {
         KeyCode::Enter => {
             let value = normalize_input(ui.add_input.as_deref().unwrap_or_default()).to_owned();
 
             if value.is_empty() {
-                ui.status_message = String::from("Enter a URL, magnet URI or .torrent path");
+                ui.status_message =
+                    String::from("Enter a URL, magnet URI, .torrent path, or a link-file path");
             } else {
                 ui.add_input = None;
 
@@ -94,6 +108,17 @@ pub(super) fn handle(
                         "Preparing local torrent...",
                     );
                     ui.status_message = message;
+                } else if input_is_link_file(&value) {
+                    match link_file_worker.import_file(PathBuf::from(value)) {
+                        Ok(()) => {
+                            ui.status_message =
+                                String::from("Importing downloads from link file...")
+                        }
+                        Err(error) => {
+                            logging::warn(&format!("Could not queue link-file import: {error}"));
+                            ui.status_message = error;
+                        }
+                    }
                 } else {
                     let result = if input_is_uri(&value) {
                         backend.add_uri(&value)
@@ -141,6 +166,8 @@ pub(super) fn handle(
 
 #[cfg(test)]
 mod tests {
+    use crate::ui::event_loop::keyboard::add_input::input_is_link_file;
+
     use super::{input_is_magnet, input_is_uri, normalize_input};
 
     #[test]
@@ -167,5 +194,20 @@ mod tests {
         assert_eq!(normalized, "magnet:?xt=urn:btih:0123456789abcdef");
         assert!(input_is_magnet(normalized));
         assert!(input_is_uri(normalized));
+    }
+
+    #[test]
+    fn recognizes_supported_link_file_extensions() {
+        assert!(input_is_link_file("downloads.txt"));
+        assert!(input_is_link_file("downloads.links"));
+        assert!(input_is_link_file("downloads.list"));
+        assert!(input_is_link_file("downloads.TXT"));
+    }
+
+    #[test]
+    fn does_not_recognize_unrelated_file_extensions() {
+        assert!(!input_is_link_file("archive.zip"));
+        assert!(!input_is_link_file("torrent.torrent"));
+        assert!(!input_is_link_file("downloads.md"));
     }
 }

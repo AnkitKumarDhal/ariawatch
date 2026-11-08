@@ -10,7 +10,10 @@ use crate::{
     monitor::MonitorUpdate,
     ui::{
         TorrentSelection,
-        event_loop::torrent_worker::{TorrentWorker, TorrentWorkerEvent},
+        event_loop::{
+            link_file_worker::{LinkFileWorker, LinkFileWorkerEvent},
+            torrent_worker::{TorrentWorker, TorrentWorkerEvent},
+        },
     },
 };
 use crossterm::event::{self, Event};
@@ -21,6 +24,7 @@ use std::{
     time::Duration,
 };
 mod keyboard;
+mod link_file_worker;
 mod state;
 mod torrent_worker;
 use state::LoopState;
@@ -36,6 +40,7 @@ pub(super) fn run(
 ) -> Result<ExitChoice, String> {
     let mut ui = LoopState::new();
     let torrent_worker = TorrentWorker::start(Arc::clone(backend))?;
+    let link_file_worker = LinkFileWorker::start(Arc::clone(backend))?;
 
     loop {
         while let Ok(worker_event) = torrent_worker.try_recv() {
@@ -94,6 +99,29 @@ pub(super) fn run(
                     ui.pending_torrent_preparation = None;
                     logging::error(&format!("Torrent preparation failed: {error}"));
                     ui.status_message = String::from("Torrent preparation failed; see logs");
+                }
+            }
+
+            ui.redraw_needed = true;
+        }
+
+        while let Ok(worker_event) = link_file_worker.try_recv() {
+            match worker_event {
+                LinkFileWorkerEvent::Imported {
+                    total,
+                    added,
+                    failed,
+                } => {
+                    ui.status_message = if failed == 0 {
+                        format!("Added {added} of {total} downloads from link file")
+                    } else {
+                        format!("Added {added} of {total}; {failed} failed (see logs)")
+                    };
+                }
+
+                LinkFileWorkerEvent::Failed(error) => {
+                    logging::error(&format!("Link-file import failed: {error}"));
+                    ui.status_message = format!("Link-file import failed: {error}")
                 }
             }
 
@@ -208,6 +236,7 @@ pub(super) fn run(
                         backend.as_ref(),
                         history,
                         &torrent_worker,
+                        &link_file_worker,
                     ) {
                         return Ok(exit_choice);
                     }

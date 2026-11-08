@@ -92,7 +92,7 @@ pub(super) fn draw_add_dialog(frame: &mut Frame<'_>, input: &str) {
     frame.render_widget(Clear, area);
 
     let dialog = Paragraph::new(vec![
-        Line::from("URL, magnet URI, or local .torrent path"),
+        Line::from("URL, magnet URI, local .torrent path, or plain-text link file"),
         Line::from(""),
         Line::from(format!("> {input}_")),
         Line::from(""),
