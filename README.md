@@ -52,6 +52,7 @@ Managed mode is used by default. To connect to an existing aria2 instance, use e
 | --- | --- |
 | `↑` / `↓` or `j` / `k` | Navigate downloads |
 | `a` | Add a download |
+| `f` | View files in the selected download |
 | `p` / `r` | Pause / resume selected download |
 | `P` / `R` | Pause / resume all downloads |
 | `x` | Remove download (keep files) |
