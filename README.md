@@ -1,5 +1,3 @@
-
-
 # AriaWatch
 
 **A modern, keyboard-driven TUI download manager for aria2, written in Rust.**
@@ -84,6 +82,22 @@ AriaWatch stores application data using the XDG directory conventions, with home
 
 Download history is stored in SQLite, while aria2's session file is used to restore unfinished downloads. These serve different purposes and are maintained separately.
 
+### Configuration
+
+AriaWatch automatically creates a default configuration file at:
+
+`~/.config/ariawatch/config.toml`
+
+You can customize the managed download directory:
+
+```toml
+[downloads]
+directory = "/mnt/storage/Downloads"
+```
+Relative paths are resolved against the user's home directory.
+Absolute paths are used as specified.
+the default directory is `~/Downloads`
+
 ## Troubleshooting
 
 **`aria2c` not found**
@@ -119,5 +133,3 @@ For additional help, report reproducible issues through [GitHub Issues](https://
 ## License
 
 AriaWatch is licensed under the [MIT License](LICENSE).
-
-
