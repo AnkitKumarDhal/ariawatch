@@ -70,6 +70,20 @@ Supported protocols: HTTP, HTTPS, FTP, FTPS, and SFTP.
 
 Magnet links are handled separately through the torrent workflow.
 
+### Torrent file selection
+
+When adding a magnet link or local torrent file, AriaWatch
+retrieves its metadata and opens a file-selection dialog.
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` or `j` / `k` | Navigate files |
+| `Space` | Toggle file selection |
+| `a` | Select all files |
+| `n` | Deselect all files |
+| `Enter` | Confirm and start download |
+| `Esc` | Cancel |
+
 ## Persistence
 
 AriaWatch stores application data using the XDG directory conventions, with home-directory fallbacks.

@@ -125,7 +125,7 @@ pub(super) fn draw_remove_dialog(
     };
 
     let warning = if delete_files {
-        "Downloaded files under ~/Downloads will be permanently deleted."
+        "Downloaded files in the managed directory will be permanently deleted."
     } else {
         "The aria2 entry will be removed, but downloaded files will remain."
     };
