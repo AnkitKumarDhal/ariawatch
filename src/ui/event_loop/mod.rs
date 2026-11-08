@@ -29,6 +29,13 @@ mod state;
 mod torrent_worker;
 use state::LoopState;
 
+// this is to just club the torrent and link file workers, to reduce the number of arguments in the
+// handle_key function
+pub(super) struct EventWorkers<'a> {
+    torrent: &'a TorrentWorker,
+    link_file: &'a LinkFileWorker,
+}
+
 // Handles keyboard input
 pub(super) fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -41,6 +48,10 @@ pub(super) fn run(
     let mut ui = LoopState::new();
     let torrent_worker = TorrentWorker::start(Arc::clone(backend))?;
     let link_file_worker = LinkFileWorker::start(Arc::clone(backend))?;
+    let workers = EventWorkers {
+        torrent: &torrent_worker,
+        link_file: &link_file_worker,
+    };
 
     loop {
         while let Ok(worker_event) = torrent_worker.try_recv() {
@@ -235,8 +246,7 @@ pub(super) fn run(
                         managed_mode,
                         backend.as_ref(),
                         history,
-                        &torrent_worker,
-                        &link_file_worker,
+                        &workers,
                     ) {
                         return Ok(exit_choice);
                     }

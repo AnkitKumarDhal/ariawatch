@@ -5,7 +5,7 @@ use crate::{
     logging,
     ui::{
         ExitChoice,
-        event_loop::{LinkFileWorker, LoopState, TorrentWorker},
+        event_loop::{EventWorkers, LoopState},
     },
 };
 use crossterm::event::{KeyEvent, KeyEventKind};
@@ -24,21 +24,20 @@ pub(super) fn handle_key(
     managed_mode: bool,
     backend: &dyn DownloadBackend,
     history: &mut HistoryStore,
-    torrent_worker: &TorrentWorker,
-    link_file_worker: &LinkFileWorker,
+    workers: &EventWorkers<'_>,
 ) -> Option<ExitChoice> {
     if key.kind != KeyEventKind::Press {
         return None;
     }
 
     if ui.pending_torrent_selection.is_some() {
-        torrent_selection::handle(key, ui, torrent_worker);
+        torrent_selection::handle(key, ui, workers.torrent);
     } else if ui.pending_removal.is_some() {
         removal::handle(key, ui, state, backend, history);
     } else if ui.history_view.is_some() {
         history::handle(key, ui, history);
     } else if ui.add_input.is_some() {
-        add_input::handle(key, ui, backend, torrent_worker, link_file_worker);
+        add_input::handle(key, ui, backend, workers.torrent, workers.link_file);
     } else if ui.show_exit_dialog {
         return exit_dialog::handle(key, ui);
     } else if ui.show_file_list {
