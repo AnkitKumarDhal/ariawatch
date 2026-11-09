@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Format, check, test and lint
+    name: Linux - Format, check, test and lint
     runs-on: ubuntu-latest
 
     steps:
@@ -43,3 +43,24 @@ jobs:
 
       - name: Run Clippy
         run: cargo clippy --all-targets -- -D warnings
+
+  windows-portability:
+    name: Windows - Portability baseline
+    runs-on: windows-latest
+
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check all targets
+        run: cargo check --all-targets
