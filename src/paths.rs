@@ -241,7 +241,7 @@ impl AppPaths {
         Ok(())
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     pub fn prepare_runtime_dir(&self) -> Result<(), String> {
         use std::{io::ErrorKind, os::windows::fs::MetadataExt};
 
@@ -513,109 +513,108 @@ mod tests {
         assert_ne!(first, different);
         assert!(!first.to_string_lossy().contains("localhost"));
     }
+}
 
-    #[cfg(all(test, windows))]
-    mod windows_tests {
-        use super::AppPaths;
-        use std::{
-            fs,
-            path::PathBuf,
-            time::{SystemTime, UNIX_EPOCH},
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::AppPaths;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn test_root() -> PathBuf {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        std::env::temp_dir().join(format!(
+            "ariawatch-path-test-{}-{unique_id}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn resolves_windows_application_directories() {
+        let roaming = PathBuf::from(r"C:\Users\test\AppData\Roaming");
+
+        let local = PathBuf::from(r"C:\Users\test\AppData\Local");
+
+        let paths =
+            AppPaths::from_windows_values(Some(roaming.clone()), Some(local.clone())).unwrap();
+
+        let app_data = local.join("ariawatch");
+
+        assert_eq!(paths.data_dir, app_data);
+        assert_eq!(paths.config_dir, roaming.join("ariawatch"));
+        assert_eq!(paths.state_dir, local.join("ariawatch").join("state"));
+        assert_eq!(paths.runtime_dir, local.join("ariawatch").join("runtime"));
+    }
+
+    #[test]
+    fn rejects_relative_windows_application_directories() {
+        let local = PathBuf::from(r"C:\Users\test\AppData\Local");
+
+        let error = AppPaths::from_windows_values(Some(PathBuf::from("relative")), Some(local))
+            .unwrap_err();
+
+        assert!(error.contains("APPDATA"));
+
+        let roaming = PathBuf::from(r"C:\Users\test\AppData\Roaming");
+
+        let error = AppPaths::from_windows_values(Some(roaming), Some(PathBuf::from("relative")))
+            .unwrap_err();
+
+        assert!(error.contains("LOCALAPPDATA"));
+    }
+
+    #[test]
+    fn creates_runtime_directory() {
+        use std::os::windows::fs::MetadataExt;
+
+        let root = test_root();
+
+        let paths = AppPaths {
+            data_dir: root.join("data"),
+            config_dir: root.join("config"),
+            state_dir: root.join("state"),
+            runtime_dir: root.join("runtime"),
         };
 
-        fn test_root() -> PathBuf {
-            let unique_id = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+        paths.prepare_runtime_dir().unwrap();
 
-            std::env::temp_dir().join(format!(
-                "ariawatch-path-test-{}-{unique_id}",
-                std::process::id()
-            ))
-        }
+        let metadata = fs::symlink_metadata(&paths.runtime_dir).unwrap();
 
-        #[test]
-        fn resolves_windows_application_directories() {
-            let roaming = PathBuf::from(r"C:\Users\test\AppData\Roaming");
+        assert!(metadata.is_dir());
+        assert_eq!(metadata.file_attributes() & 0x0000_0400, 0);
 
-            let local = PathBuf::from(r"C:\Users\test\AppData\Local");
+        fs::remove_dir_all(root).unwrap();
+    }
 
-            let paths =
-                AppPaths::from_windows_values(Some(roaming.clone()), Some(local.clone())).unwrap();
+    #[test]
+    fn rejects_file_as_runtime_directory() {
+        let root = test_root();
+        fs::create_dir_all(&root).unwrap();
 
-            let app_data = local.join("ariawatch");
+        let runtime_dir = root.join("runtime");
+        fs::write(&runtime_dir, "not a directory").unwrap();
 
-            assert_eq!(paths.data_dir, app_data);
-            assert_eq!(paths.config_dir, roaming.join("ariawatch"));
-            assert_eq!(paths.state_dir, local.join("ariawatch").join("state"));
-            assert_eq!(paths.runtime_dir, local.join("ariawatch").join("runtime"));
-        }
+        let paths = AppPaths {
+            data_dir: root.join("data"),
+            config_dir: root.join("config"),
+            state_dir: root.join("state"),
+            runtime_dir,
+        };
 
-        #[test]
-        fn rejects_relative_windows_application_directories() {
-            let local = PathBuf::from(r"C:\Users\test\AppData\Local");
+        assert!(
+            paths
+                .prepare_runtime_dir()
+                .unwrap_err()
+                .contains("not a directory")
+        );
 
-            let error = AppPaths::from_windows_values(Some(PathBuf::from("relative")), Some(local))
-                .unwrap_err();
-
-            assert!(error.contains("APPDATA"));
-
-            let roaming = PathBuf::from(r"C:\Users\test\AppData\Roaming");
-
-            let error =
-                AppPaths::from_windows_values(Some(roaming), Some(PathBuf::from("relative")))
-                    .unwrap_err();
-
-            assert!(error.contains("LOCALAPPDATA"));
-        }
-
-        #[test]
-        fn creates_runtime_directory() {
-            use std::os::windows::fs::MetadataExt;
-
-            let root = test_root();
-
-            let paths = AppPaths {
-                data_dir: root.join("data"),
-                config_dir: root.join("config"),
-                state_dir: root.join("state"),
-                runtime_dir: root.join("runtime"),
-            };
-
-            paths.prepare_runtime_dir().unwrap();
-
-            let metadata = fs::symlink_metadata(&paths.runtime_dir).unwrap();
-
-            assert!(metadata.is_dir());
-            assert_eq!(metadata.file_attributes() & 0x0000_0400, 0);
-
-            fs::remove_dir_all(root).unwrap();
-        }
-
-        #[test]
-        fn rejects_file_as_runtime_directory() {
-            let root = test_root();
-            fs::create_dir_all(&root).unwrap();
-
-            let runtime_dir = root.join("runtime");
-            fs::write(&runtime_dir, "not a directory").unwrap();
-
-            let paths = AppPaths {
-                data_dir: root.join("data"),
-                config_dir: root.join("config"),
-                state_dir: root.join("state"),
-                runtime_dir,
-            };
-
-            assert!(
-                paths
-                    .prepare_runtime_dir()
-                    .unwrap_err()
-                    .contains("not a directory")
-            );
-
-            fs::remove_dir_all(root).unwrap();
-        }
+        fs::remove_dir_all(root).unwrap();
     }
 }
