@@ -11,6 +11,7 @@ pub struct AppPaths {
 
 impl AppPaths {
     // automatically sniffs out the paths
+    #[cfg(unix)]
     pub fn discover() -> Result<Self, String> {
         Self::from_values(
             env::var_os("HOME").map(PathBuf::from),
@@ -19,6 +20,43 @@ impl AppPaths {
             env::var_os("XDG_STATE_HOME").map(PathBuf::from),
             env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
         )
+    }
+
+    // this one is for windows
+    #[cfg(windows)]
+    pub fn discover() -> Result<Self, String> {
+        Self::from_windows_values(
+            env::var_os("APPDATA").map(PathBuf::from),
+            env::var_os("LOCALAPPDATA").map(PathBuf::from),
+        )
+    }
+
+    // it just verifies if the paths are correct or not
+    #[cfg(windows)]
+    fn from_windows_values(
+        roaming_app_data: Option<PathBuf>,
+        local_app_data: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        let roaming_app_data = roaming_app_data
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| {
+                String::from("Could not determine APPDATA: set it to an absolute path")
+            })?;
+
+        let local_app_data = local_app_data
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| {
+                String::from("Could not determine LOCALAPPDATA: set it to an absolute path")
+            })?;
+
+        let app_data_dir = local_app_data.join("ariawatch");
+
+        Ok(Self {
+            data_dir: app_data_dir.clone(),
+            config_dir: roaming_app_data.join("ariawatch"),
+            state_dir: app_data_dir.join("state"),
+            runtime_dir: app_data_dir.join("runtime"),
+        })
     }
 
     // this makes it such taht if you connect an external server to ariawatch, it gets its own
@@ -37,6 +75,7 @@ impl AppPaths {
     }
 
     // *helps* with the automatic sniffing of paths
+    #[cfg(unix)]
     fn from_values(
         home: Option<PathBuf>,
         data_home: Option<PathBuf>,
@@ -204,13 +243,75 @@ impl AppPaths {
 
     #[cfg(not(unix))]
     pub fn prepare_runtime_dir(&self) -> Result<(), String> {
-        Err(String::from(
-            "Secure runtime directory preparation is currently supported only on Unix",
-        ))
+        use std::{io::ErrorKind, os::windows::fs::MetadataExt};
+
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+        match std::fs::symlink_metadata(&self.runtime_dir) {
+            Ok(metadata) => {
+                if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    return Err(format!(
+                        "Runtime directory must not be a reparse point: {}",
+                        self.runtime_dir.display()
+                    ));
+                }
+
+                if !metadata.is_dir() {
+                    return Err(format!(
+                        "Runtime path is not a directory: {}",
+                        self.runtime_dir.display()
+                    ));
+                }
+            }
+
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                std::fs::create_dir_all(&self.runtime_dir).map_err(|error| {
+                    format!(
+                        "Could not create runtime directory {}: {error}",
+                        self.runtime_dir.display()
+                    )
+                })?;
+            }
+
+            Err(error) => {
+                return Err(format!(
+                    "Could not inspect runtime directory {}: {error}",
+                    self.runtime_dir.display()
+                ));
+            }
+        }
+
+        let metadata = std::fs::symlink_metadata(&self.runtime_dir).map_err(|error| {
+            format!(
+                "Could not inspect runtime directory {}: {error}",
+                self.runtime_dir.display()
+            )
+        })?;
+
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(format!(
+                "Runtime directory must not be a reparse point: {}",
+                self.runtime_dir.display()
+            ));
+        }
+
+        if !metadata.is_dir() {
+            return Err(format!(
+                "Runtime path is not a directory: {}",
+                self.runtime_dir.display()
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    pub fn prepare_runtime_dir(&self) -> Result<(), String> {
+        Err(String::from("Unsupported operating system"))
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::AppPaths;
     use std::path::PathBuf;
@@ -411,5 +512,110 @@ mod tests {
         assert_eq!(first, same);
         assert_ne!(first, different);
         assert!(!first.to_string_lossy().contains("localhost"));
+    }
+
+    #[cfg(all(test, windows))]
+    mod windows_tests {
+        use super::AppPaths;
+        use std::{
+            fs,
+            path::PathBuf,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        fn test_root() -> PathBuf {
+            let unique_id = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+
+            std::env::temp_dir().join(format!(
+                "ariawatch-path-test-{}-{unique_id}",
+                std::process::id()
+            ))
+        }
+
+        #[test]
+        fn resolves_windows_application_directories() {
+            let roaming = PathBuf::from(r"C:\Users\test\AppData\Roaming");
+
+            let local = PathBuf::from(r"C:\Users\test\AppData\Local");
+
+            let paths =
+                AppPaths::from_windows_values(Some(roaming.clone()), Some(local.clone())).unwrap();
+
+            let app_data = local.join("ariawatch");
+
+            assert_eq!(paths.data_dir, app_data);
+            assert_eq!(paths.config_dir, roaming.join("ariawatch"));
+            assert_eq!(paths.state_dir, local.join("ariawatch").join("state"));
+            assert_eq!(paths.runtime_dir, local.join("ariawatch").join("runtime"));
+        }
+
+        #[test]
+        fn rejects_relative_windows_application_directories() {
+            let local = PathBuf::from(r"C:\Users\test\AppData\Local");
+
+            let error = AppPaths::from_windows_values(Some(PathBuf::from("relative")), Some(local))
+                .unwrap_err();
+
+            assert!(error.contains("APPDATA"));
+
+            let roaming = PathBuf::from(r"C:\Users\test\AppData\Roaming");
+
+            let error =
+                AppPaths::from_windows_values(Some(roaming), Some(PathBuf::from("relative")))
+                    .unwrap_err();
+
+            assert!(error.contains("LOCALAPPDATA"));
+        }
+
+        #[test]
+        fn creates_runtime_directory() {
+            use std::os::windows::fs::MetadataExt;
+
+            let root = test_root();
+
+            let paths = AppPaths {
+                data_dir: root.join("data"),
+                config_dir: root.join("config"),
+                state_dir: root.join("state"),
+                runtime_dir: root.join("runtime"),
+            };
+
+            paths.prepare_runtime_dir().unwrap();
+
+            let metadata = fs::symlink_metadata(&paths.runtime_dir).unwrap();
+
+            assert!(metadata.is_dir());
+            assert_eq!(metadata.file_attributes() & 0x0000_0400, 0);
+
+            fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn rejects_file_as_runtime_directory() {
+            let root = test_root();
+            fs::create_dir_all(&root).unwrap();
+
+            let runtime_dir = root.join("runtime");
+            fs::write(&runtime_dir, "not a directory").unwrap();
+
+            let paths = AppPaths {
+                data_dir: root.join("data"),
+                config_dir: root.join("config"),
+                state_dir: root.join("state"),
+                runtime_dir,
+            };
+
+            assert!(
+                paths
+                    .prepare_runtime_dir()
+                    .unwrap_err()
+                    .contains("not a directory")
+            );
+
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 }

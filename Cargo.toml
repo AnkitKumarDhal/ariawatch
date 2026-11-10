@@ -2,6 +2,7 @@
 name = "ariawatch"
 version = "0.4.0"
 edition = "2024"
+rust-version = "1.89"
 description = "An aria2 based download manager in the terminal"
 license = "MIT"
 repository = "https://github.com/AnkitKumarDhal/ariaWatch"
