@@ -187,32 +187,11 @@ impl ManagedAria2 {
             return;
         }
 
-        if let Ok(request) =
-            aria2::build_rpc_request("aria2.shutdown", Vec::new(), Some(&self.rpc_secret))
-        {
-            let endpoint = RPC_ENDPOINT.to_owned();
-
-            thread::spawn(move || {
-                if let Err(error) = aria2::send_rpc_request(&endpoint, &request) {
-                    logging::warn(&format!(
-                        "Graceful aria2 shutdown request returned an error: {error}"
-                    ));
-                }
-            });
-        }
-
-        if self.wait_for_exit(SHUTDOWN_TIMEOUT) {
-            self.stopped = true;
-            return;
-        }
-
-        logging::warn("Managed aria2c did not stop in time; sending SIGTERM");
-
         unsafe {
             libc::kill(self.child.id() as libc::pid_t, libc::SIGTERM);
         }
 
-        if self.wait_for_exit(Duration::from_secs(2)) {
+        if self.wait_for_exit(SHUTDOWN_TIMEOUT) {
             self.stopped = true;
             return;
         }
