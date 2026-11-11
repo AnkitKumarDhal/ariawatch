@@ -2,8 +2,8 @@
 // setup, not just a monitor
 use crate::{aria2, logging, paths::AppPaths};
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
