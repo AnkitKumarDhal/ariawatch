@@ -5,7 +5,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
@@ -217,6 +217,23 @@ fn remove_stale_socket(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// the stream config helper
+fn configure_ipc_stream<S>(stream: &S) -> io::Result<()>
+where
+    S: interprocess::local_socket::traits::Stream,
+{
+    #[cfg(unix)]
+    {
+        stream.set_recv_timeout(Some(CLIENT_TIMEOUT))?;
+        stream.set_send_timeout(Some(CLIENT_TIMEOUT))?;
+    }
+
+    #[cfg(windows)]
+    stream.set_nonblocking(true)?;
+
+    Ok(())
+}
+
 // this is the actual main function of this part,,, the actual server loop
 // NOTE now that this function is updated, it still does the same thing, but it also checks up on
 // the controller process periodically too
@@ -238,14 +255,8 @@ pub fn run(paths: &AppPaths, aria2: &mut ManagedAria2) -> Result<(), String> {
         }
         match socket.listener.accept() {
             Ok(stream) => {
-                let timeout_result = stream
-                    .set_recv_timeout(Some(CLIENT_TIMEOUT))
-                    .and_then(|()| stream.set_send_timeout(Some(CLIENT_TIMEOUT)));
-
-                if let Err(error) = timeout_result {
-                    logging::warn(&format!(
-                        "Could not configure IPC connection timeouts: {error}"
-                    ));
+                if let Err(error) = configure_ipc_stream(&stream) {
+                    logging::warn(&format!("Could not configure IPC connection: {error}"));
                     continue;
                 }
 
@@ -318,19 +329,51 @@ pub(super) fn send_command(paths: &AppPaths, command: &str) -> Result<String, St
             )
         })?;
 
-    stream
-        .set_recv_timeout(Some(CLIENT_TIMEOUT))
-        .map_err(|error| format!("Could not set IPC read timeout: {error}"))?;
-    stream
-        .set_send_timeout(Some(CLIENT_TIMEOUT))
-        .map_err(|error| format!("Could not set IPC write timeout: {error}"))?;
+    configure_ipc_stream(&stream)
+        .map_err(|error| format!("Could not configure IPC connection: {error}"))?;
 
-    stream
-        .write_all(command.as_bytes())
-        .and_then(|()| stream.write_all(b"\n"))
+    configure_ipc_stream(&stream)
+        .map_err(|error| format!("Could not configure IPC connection: {error}"))?;
+
+    write_all_with_timeout(&mut stream, command.as_bytes())
+        .and_then(|()| write_all_with_timeout(&mut stream, b"\n"))
         .map_err(|error| format!("Could not send IPC command: {error}"))?;
 
     read_command(&mut stream).map_err(|error| format!("Could not read IPC response: {error}"))
+}
+
+fn write_all_with_timeout<W: Write>(stream: &mut W, mut bytes: &[u8]) -> io::Result<()> {
+    let deadline = Instant::now() + CLIENT_TIMEOUT;
+
+    while !bytes.is_empty() {
+        match stream.write(bytes) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "IPC stream accepted no bytes",
+                ));
+            }
+            Ok(written) => bytes = &bytes[written..],
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                if Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "IPC write timedout",
+                    ));
+                }
+
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(())
 }
 
 // run() runs the server loop, and this handle_connection() handles one connected client at a time
@@ -347,8 +390,7 @@ where
         _ => ("ERROR unknown command\n", false),
     };
 
-    stream
-        .write_all(response.as_bytes())
+    write_all_with_timeout(&mut stream, response.as_bytes())
         .map_err(|error| format!("Could not write IPC response: {error}"))?;
 
     Ok(should_stop)
@@ -359,20 +401,21 @@ where
 // automatically)
 fn read_command<R: Read>(stream: &mut R) -> io::Result<String> {
     let mut command = Vec::with_capacity(MAX_COMMAND_LENGTH);
+    let deadline = Instant::now() + CLIENT_TIMEOUT;
 
     loop {
         let mut byte = [0_u8; 1];
-        match stream.read(&mut byte)? {
-            0 => {
+        match stream.read(&mut byte) {
+            Ok(0) => {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "client disconnected before sending a complete command",
                 ));
             }
 
-            _ if byte[0] == b'\n' => break,
+            Ok(_) if byte[0] == b'\n' => break,
 
-            _ => {
+            Ok(_) => {
                 if command.len() >= MAX_COMMAND_LENGTH {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -382,6 +425,23 @@ fn read_command<R: Read>(stream: &mut R) -> io::Result<String> {
 
                 command.push(byte[0]);
             }
+
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                if Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "IPC command timed out",
+                    ));
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+
+            Err(error) => return Err(error),
         }
     }
 
@@ -394,7 +454,10 @@ fn read_command<R: Read>(stream: &mut R) -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BoundSocket, CLIENT_TIMEOUT, MAX_COMMAND_LENGTH, handle_connection, ipc_endpoint};
+    use super::{
+        BoundSocket, CLIENT_TIMEOUT, MAX_COMMAND_LENGTH, configure_ipc_stream, handle_connection,
+        ipc_endpoint, read_command, write_all_with_timeout,
+    };
     use interprocess::{
         ConnectWaitMode,
         local_socket::{
@@ -510,23 +573,20 @@ mod tests {
         let worker = thread::spawn(move || {
             let stream = socket.listener.accept().unwrap();
 
-            stream.set_recv_timeout(Some(CLIENT_TIMEOUT)).unwrap();
-            stream.set_send_timeout(Some(CLIENT_TIMEOUT)).unwrap();
+            configure_ipc_stream(&stream).unwrap();
 
             handle_connection(stream).unwrap()
         });
 
         let mut client = connect_local(&socket_path);
 
-        client.set_recv_timeout(Some(CLIENT_TIMEOUT)).unwrap();
-        client.set_send_timeout(Some(CLIENT_TIMEOUT)).unwrap();
+        configure_ipc_stream(&client).unwrap();
 
-        client.write_all(b"PING\n").unwrap();
+        write_all_with_timeout(&mut client, b"PING\n").unwrap();
 
-        let mut response = [0_u8; 5];
-        client.read_exact(&mut response).unwrap();
+        let response = read_command(&mut client).unwrap();
 
-        assert_eq!(&response, b"PONG\n");
+        assert_eq!(response, "PONG");
         assert!(!worker.join().unwrap());
 
         drop(client);
