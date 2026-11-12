@@ -48,8 +48,6 @@ jobs:
     name: Windows - Portability baseline
     runs-on: windows-latest
 
-    continue-on-error: true
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
