@@ -37,6 +37,25 @@ fn is_reparse_point(metadata: &fs::Metadata) -> bool {
     metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
+// this lil guy allows to use the aria2c executable file bundled with ariawatch as they live in the same direcotry
+// or if there is no bundled binary it just resorts to the binary file name so the OS searches it in its path
+fn resolve_aria2_executable(current_exe: Option<&Path>) -> PathBuf {
+    let exec_name = if cfg!(windows) {
+        "aria2c.exe"
+    } else {
+        "aria2c"
+    };
+
+    if let Some(directory) = current_exe.and_then(Path::parent) {
+        let bundled = directory.join(exec_name);
+        if bundled.is_file() {
+            return bundled;
+        }
+    }
+
+    PathBuf::from(exec_name)
+}
+
 pub(super) struct ManagedAria2 {
     child: Child,
     rpc_secret: String,
@@ -69,9 +88,12 @@ impl ManagedAria2 {
         let rpc_secret = generate_secret()?;
         let secret_file = RpcSecretFile::create(&paths.rpc_secret_file(), &rpc_secret)?;
 
+        let current_exe = std::env::current_exe().ok();
+        let aria2_executable = resolve_aria2_executable(current_exe.as_deref());
+
         // YOU SEE THIS??? THIS GRINDED MY BRAIN SO BAD
         // update: just added another integrity feature with the stop-with-process arg
-        let child = Command::new("aria2c")
+        let child = Command::new(aria2_executable)
             .arg("--no-conf=true")
             .arg("--daemon=false")
             .arg(format!("--stop-with-process={}", std::process::id()))
@@ -97,7 +119,7 @@ impl ManagedAria2 {
             .map_err(|error| {
                 if error.kind() == io::ErrorKind::NotFound {
                     String::from(
-                        "aria2c was not found on PATH. Install aria2 before starting AriaWatch.",
+                        "aria2c was not found beside Ariawatch or on PATH. Install aria2 or place aria2c next to the ariawatch executable",
                     )
                 } else {
                     format!("Could not start managed aria2c: {error}")
@@ -431,6 +453,7 @@ fn write_secret_atomically(path: &Path, value: &str) -> Result<(), String> {
 mod tests {
     use super::{
         ManagedAria2, RpcSecretFile, generate_secret, prepare_private_dir, prepare_session_file,
+        resolve_aria2_executable,
     };
     use std::{
         fs,
@@ -589,6 +612,44 @@ mod tests {
 
         assert!(prepare_session_file(&session_path).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "keep this content");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn prefers_bundled_aria2_and_falls_back_to_path() {
+        let root = test_root("ariawatch-aria2-discovery-test");
+        fs::create_dir_all(&root).unwrap();
+
+        let executable_name = if cfg!(windows) {
+            "ariawatch.exe"
+        } else {
+            "ariawatch"
+        };
+
+        let aria2_name = if cfg!(windows) {
+            "aria2c.exe"
+        } else {
+            "aria2c"
+        };
+
+        let ariawatch_exe = root.join(executable_name);
+        let bundled_aria2 = root.join(aria2_name);
+        let path_fallback = std::path::PathBuf::from(aria2_name);
+
+        assert_eq!(
+            resolve_aria2_executable(Some(&ariawatch_exe)),
+            path_fallback
+        );
+
+        assert_eq!(resolve_aria2_executable(None), path_fallback);
+
+        fs::write(&bundled_aria2, b"placeholder").unwrap();
+
+        assert_eq!(
+            resolve_aria2_executable(Some(&ariawatch_exe)),
+            bundled_aria2
+        );
 
         fs::remove_dir_all(root).unwrap();
     }
