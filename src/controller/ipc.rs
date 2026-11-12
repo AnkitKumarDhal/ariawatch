@@ -22,8 +22,7 @@ use interprocess::{
     ConnectWaitMode,
     local_socket::{
         ConnectOptions, GenericFilePath, Listener as LocalSocketListener, ListenerNonblockingMode,
-        ListenerOptions, ToFsName as _,
-        traits::{Listener as _, Stream as _},
+        ListenerOptions, ToFsName as _, traits::Listener as _,
     },
 };
 #[cfg(windows)]
@@ -404,10 +403,23 @@ fn read_command<R: Read>(stream: &mut R) -> io::Result<String> {
         let mut byte = [0_u8; 1];
         match stream.read(&mut byte) {
             Ok(0) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "client disconnected before sending a complete command",
-                ));
+                #[cfg(windows)]
+                {
+                    if Instant::now() >= deadline {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "IPC command timed out",
+                        ));
+                    }
+                }
+
+                #[cfg(not(windows))]
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "client disconnected before sending a complete command",
+                    ));
+                }
             }
 
             Ok(_) if byte[0] == b'\n' => break,
@@ -457,10 +469,7 @@ mod tests {
     };
     use interprocess::{
         ConnectWaitMode,
-        local_socket::{
-            ConnectOptions, GenericFilePath, ToFsName as _,
-            traits::{Listener as _, Stream as _},
-        },
+        local_socket::{ConnectOptions, GenericFilePath, ToFsName as _, traits::Listener as _},
     };
     use std::{
         fs,
