@@ -64,3 +64,6 @@ jobs:
 
       - name: Check all targets
         run: cargo check --all-targets
+
+      - name: Run tests
+        run: cargo test --all-targets

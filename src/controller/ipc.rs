@@ -2,12 +2,14 @@
 use super::aria2_process::ManagedAria2;
 use crate::{logging, paths::AppPaths};
 use std::{
-    fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     thread,
     time::Duration,
 };
+
+#[cfg(unix)]
+use std::fs;
 
 #[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
