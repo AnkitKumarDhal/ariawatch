@@ -630,17 +630,29 @@ mod control_tests {
 
     #[test]
     fn parses_torrent_download_directory_and_selected_nested_files() {
+        let directory = std::env::temp_dir().join("ariawatch-test-downloads");
+
+        let selected_path = directory
+            .join("Example Torrent")
+            .join("Disc 1")
+            .join("video.mkv");
+
+        let unselected_path = directory
+            .join("Example Torrent")
+            .join("Disc 2")
+            .join("video.mkv");
+
         let status = serde_json::json!({
-            "dir": "/mnt/storage/downloads",
+            "dir": directory.to_string_lossy(),
             "files": [
                 {
                     "index": "1",
-                    "path": "/mnt/storage/downloads/Example Torrent/Disc 1/video.mkv",
+                    "path": selected_path.to_string_lossy(),
                     "selected": "true"
                 },
                 {
                     "index": "2",
-                    "path": "/mnt/storage/downloads/Example Torrent/Disc 2/video.mkv",
+                    "path": unselected_path.to_string_lossy(),
                     "selected": "false"
                 }
             ]
@@ -648,17 +660,8 @@ mod control_tests {
 
         let info = parse_download_file_info(&status, "aria2.tellStatus").unwrap();
 
-        assert_eq!(
-            info.directory,
-            std::path::PathBuf::from("/mnt/storage/downloads")
-        );
-
-        assert_eq!(
-            info.paths,
-            vec![std::path::PathBuf::from(
-                "/mnt/storage/downloads/Example Torrent/Disc 1/video.mkv"
-            )]
-        );
+        assert_eq!(info.directory, directory);
+        assert_eq!(info.paths, vec![selected_path]);
     }
 
     #[test]

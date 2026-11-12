@@ -332,9 +332,6 @@ pub(super) fn send_command(paths: &AppPaths, command: &str) -> Result<String, St
     configure_ipc_stream(&stream)
         .map_err(|error| format!("Could not configure IPC connection: {error}"))?;
 
-    configure_ipc_stream(&stream)
-        .map_err(|error| format!("Could not configure IPC connection: {error}"))?;
-
     write_all_with_timeout(&mut stream, command.as_bytes())
         .and_then(|()| write_all_with_timeout(&mut stream, b"\n"))
         .map_err(|error| format!("Could not send IPC command: {error}"))?;
