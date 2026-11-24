@@ -22,4 +22,6 @@ tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 toml = "1.1.8"
 getrandom = "0.3.4"
 interprocess = "2.4.7"
+
+[target.'cfg(windows)'.dependencies]
 widestring = "1"
