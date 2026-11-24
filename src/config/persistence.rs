@@ -2,13 +2,37 @@ use crate::config::{DownloadsConfig, UserConfig};
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
-    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+#[cfg(windows)]
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+#[cfg(unix)]
 const CONFIG_DIR_MODE: u32 = 0o700;
+
+#[cfg(unix)]
 const CONFIG_FILE_MODE: u32 = 0o600;
+
+#[cfg(unix)]
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
 
 // this loads the config file, and creates a default file if one does not exist, that too with default settings (pretty neat feature imo)
 pub fn load_or_create(path: &Path) -> Result<UserConfig, String> {
@@ -95,34 +119,41 @@ fn prepare_config_dir(path: &Path) -> Result<(), String> {
         )
     })?;
 
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if is_reparse_point(&metadata) || !metadata.is_dir() {
         return Err(format!(
             "Configuration path must be a real directory: {}",
             path.display()
         ));
     }
 
-    let current_uid = unsafe { libc::geteuid() };
+    #[cfg(unix)]
+    {
+        let current_uid = unsafe { libc::geteuid() };
 
-    if metadata.uid() != current_uid {
-        return Err(format!(
-            "Configuration directory is not owned by the current user: {}",
-            path.display()
-        ));
+        if metadata.uid() != current_uid {
+            return Err(format!(
+                "Configuration directory is not owned by the current user: {}",
+                path.display()
+            ));
+        }
+
+        fs::set_permissions(path, fs::Permissions::from_mode(CONFIG_DIR_MODE)).map_err(
+            |error| {
+                format!(
+                    "Could not secure configuration directory {}: {error}",
+                    path.display()
+                )
+            },
+        )?;
     }
 
-    fs::set_permissions(path, fs::Permissions::from_mode(CONFIG_DIR_MODE)).map_err(|error| {
-        format!(
-            "Could not secure configuration directory {}: {error}",
-            path.display()
-        )
-    })
+    Ok(())
 }
 
 // checks whether a file is a regular file owned by the current user, is not a symlink and has no
 // additional hard links
 fn validate_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<(), String> {
-    if metadata.file_type().is_symlink() {
+    if is_reparse_point(metadata) {
         return Err(format!(
             "Configuration path must not be a symlink: {}",
             path.display()
@@ -136,20 +167,23 @@ fn validate_file_metadata(path: &Path, metadata: &fs::Metadata) -> Result<(), St
         ));
     }
 
-    let current_uid = unsafe { libc::geteuid() };
+    #[cfg(unix)]
+    {
+        let current_uid = unsafe { libc::geteuid() };
 
-    if metadata.uid() != current_uid {
-        return Err(format!(
-            "Configuration directory is not owned by the current user: {}",
-            path.display()
-        ));
-    }
+        if metadata.uid() != current_uid {
+            return Err(format!(
+                "Configuration directory is not owned by the current user: {}",
+                path.display()
+            ));
+        }
 
-    if metadata.nlink() != 1 {
-        return Err(format!(
-            "Configuration file must not have multiple hard link: {}",
-            path.display()
-        ));
+        if metadata.nlink() != 1 {
+            return Err(format!(
+                "Configuration file must not have multiple hard link: {}",
+                path.display()
+            ));
+        }
     }
 
     Ok(())
@@ -178,11 +212,18 @@ fn read_config(path: &Path) -> Result<UserConfig, String> {
 
     validate_file_metadata(path, &metadata)?;
 
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+    let mut options = OpenOptions::new();
+    options.read(true);
+
+    #[cfg(unix)]
+    options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+
+    #[cfg(windows)]
+    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+
+    let mut file = options
         .open(path)
-        .map_err(|error| format!("Could not open config file {}: {error}", path.display()))?;
+        .map_err(|error| format!("COuld not open config file {}: {error}", path.display()))?;
 
     let metadata = file.metadata().map_err(|error| {
         format!(
@@ -193,6 +234,7 @@ fn read_config(path: &Path) -> Result<UserConfig, String> {
 
     validate_file_metadata(path, &metadata)?;
 
+    #[cfg(unix)]
     file.set_permissions(fs::Permissions::from_mode(CONFIG_FILE_MODE))
         .map_err(|error| format!("Could not secure config file: {error}"))?;
 
@@ -244,18 +286,24 @@ fn write_temporary_file(path: &Path, contents: &str) -> Result<PathBuf, String> 
         std::process::id()
     ));
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
+    let mut options = OpenOptions::new();
+
+    options.write(true).create_new(true);
+
+    #[cfg(unix)]
+    options
         .mode(CONFIG_FILE_MODE)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-        .open(&temporary_path)
-        .map_err(|error| {
-            format!(
-                "Could not create temporary config file {}: {error}",
-                temporary_path.display()
-            )
-        })?;
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+
+    #[cfg(windows)]
+    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+
+    let mut file = options.open(&temporary_path).map_err(|error| {
+        format!(
+            "Could not create temporary config file {}: {error}",
+            path.display()
+        )
+    })?;
 
     let result = file
         .write_all(contents.as_bytes())
@@ -468,5 +516,39 @@ mod tests {
 
         assert!(load_or_create(Path::new("config.toml")).is_err());
         assert!(load_or_create(Path::new("/tmp/config.toml")).is_err());
+    }
+
+    #[test]
+    fn replaces_existing_configuration_without_leaving_temporary_files() {
+        let (root, path) = test_path();
+
+        let first_config = UserConfig {
+            downloads: DownloadsConfig {
+                directory: PathBuf::from("First"),
+            },
+        };
+
+        let second_config = UserConfig {
+            downloads: DownloadsConfig {
+                directory: PathBuf::from("Second"),
+            },
+        };
+
+        save(&path, &first_config).unwrap();
+        save(&path, &second_config).unwrap();
+
+        let loaded = load_or_create(&path).unwrap();
+
+        assert_eq!(loaded, second_config);
+
+        let temporary_files = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+
+        assert_eq!(temporary_files, 0);
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -18,33 +18,110 @@ AriaWatch provides a terminal-based interface to manage and monitor your downloa
 
 ## Requirements
 
-- Linux (current managed-controller implementation).
-- `aria2c` installed and available on `PATH` for managed mode.
-- Rust toolchain supporting the Rust 2024 edition, if building from source.
+### Supported platforms
+
+- Linux x86_64
+- Windows x86_64
+
+### Managed mode
+
+AriaWatch uses managed mode by default. It starts and manages a local aria2 process.
+
+The `aria2c` executable must be available to AriaWatch:
+
+- **Linux:** Install aria2 and ensure `aria2c` is available on `PATH`.
+- **Windows portable:** `aria2c.exe` is bundled with the portable archive.
+- **Windows standalone:** Install aria2 separately and ensure `aria2c.exe` is available on `PATH`.
+
+AriaWatch checks for the aria2 executable beside its own executable first, then falls back to `PATH`.
+
+### External mode
+
+External mode connects to an existing aria2 instance through JSON-RPC. A local aria2 executable is not required in this mode.
+
+### Building from source
+
+- Rust 1.89 or newer.
+- Cargo.
 
 ## Installation
 
-Prebuilt binaries, when available, can be found on the [GitHub Releases](https://github.com/AnkitKumarDhal/ariawatch/releases) page.
+### Prebuilt binaries
+
+Prebuilt packages are published through [GitHub Releases](https://github.com/AnkitKumarDhal/ariawatch/releases).
+
+The release workflow produces the following packages:
+
+| Platform | Package | Contents |
+| --- | --- | --- |
+| Linux x86_64 | `.tar.gz` | AriaWatch binary, README and MIT license |
+| Windows x86_64 | Portable `.zip` | AriaWatch, bundled aria2, documentation and third-party notices |
+| Windows x86_64 | Standalone `.zip` | AriaWatch binary and documentation; requires aria2 installed separately |
+
+#### Linux
+
+1. Download the Linux x86_64 archive.
+2. Extract the archive.
+3. Ensure aria2 is installed and available on `PATH`.
+4. Run the `ariawatch` executable.
+
+#### Windows
+
+**Portable package**
+
+1. Download the Windows portable ZIP.
+2. Extract the entire archive into a directory.
+3. Keep `ariawatch.exe` and `aria2c.exe` together.
+4. Run `ariawatch.exe`.
+
+No separate aria2 installation is required.
+
+**Standalone package**
+
+1. Download and extract the standalone ZIP.
+2. Install aria2 separately.
+3. Ensure the directory containing `aria2c.exe` is available on `PATH`.
+4. Run `ariawatch.exe`.
 
 ### Build from source
 
-```bash
-git clone https://github.com/AnkitKumarDhal/ariawatch.git
-cd ariawatch
-cargo build --release
-```
+Clone the repository:
 
-Run the application:
+    git clone https://github.com/AnkitKumarDhal/ariawatch.git
+    cd ariawatch
 
-```bash
-./target/release/ariawatch
-```
+Build:
 
-Managed mode is used by default. To connect to an existing aria2 instance, use external mode:
+    cargo build --release --locked
 
-```bash
-./target/release/ariawatch --external
-```
+Run on Linux:
+
+    ./target/release/ariawatch
+
+Run on Windows PowerShell:
+
+    .\target\release\ariawatch.exe
+
+Managed mode is used by default.
+
+To connect to an existing aria2 instance, use external mode:
+
+Linux:
+
+    ./target/release/ariawatch --external
+
+Windows PowerShell:
+
+    .\target\release\ariawatch.exe --external
+
+The default JSON-RPC endpoint is:
+
+`http://127.0.0.1:6800/jsonrpc`
+
+You can specify a different endpoint using `--rpc-url` or the `ARIA2_RPC_URL` environment variable.
+
+The `ARIA2_RPC_SECRET` environment variable can be used to provide the RPC authentication secret.
+
 
 ## Keyboard shortcuts
 
@@ -88,36 +165,67 @@ retrieves its metadata and opens a file-selection dialog.
 
 AriaWatch stores application data using the XDG directory conventions, with home-directory fallbacks.
 
-| Data | Default location |
-| --- | --- |
-| Application data | `~/.local/share/ariawatch` |
-| Configuration | `~/.config/ariawatch` |
-| Logs | `~/.local/state/ariawatch` |
-| Runtime files | `$XDG_RUNTIME_DIR/ariawatch` or `~/.cache/ariawatch/runtime` |
+
+### Application directories
+
+| Data | Linux | Windows |
+| --- | --- | --- |
+| Application data | `~/.local/share/ariawatch` | `%LOCALAPPDATA%\ariawatch` |
+| Configuration | `~/.config/ariawatch` | `%APPDATA%\ariawatch` |
+| State and logs | `~/.local/state/ariawatch` | `%LOCALAPPDATA%\ariawatch\state` |
+| Runtime files | `$XDG_RUNTIME_DIR/ariawatch` or `~/.cache/ariawatch/runtime` | `%LOCALAPPDATA%\ariawatch\runtime` |
+
+On Linux, AriaWatch respects the corresponding XDG environment variables when configured.
 
 Download history is stored in SQLite, while aria2's session file is used to restore unfinished downloads. These serve different purposes and are maintained separately.
 
+
+
 ### Configuration
 
-AriaWatch automatically creates a default configuration file at:
+AriaWatch automatically creates a default configuration file.
+
+Linux:
 
 `~/.config/ariawatch/config.toml`
 
-You can customize the managed download directory:
+Windows:
 
-```toml
-[downloads]
-directory = "/mnt/storage/Downloads"
-```
-Relative paths are resolved against the user's home directory.
-Absolute paths are used as specified.
-the default directory is `~/Downloads`
+`%APPDATA%\ariawatch\config.toml`
+
+The default download directory is `Downloads` inside the user's home directory.
+
+You can customize it:
+
+    [downloads]
+    directory = "~/Downloads"
+
+For an absolute path, use the appropriate path for your operating system.
+
+Linux:
+
+    [downloads]
+    directory = "/mnt/storage/Downloads"
+
+Windows:
+
+    [downloads]
+    directory = "D:/Downloads"
+
+Relative paths are resolved against the user's home directory. Absolute paths are used as specified.
+
 
 ## Troubleshooting
 
 **`aria2c` not found**
 
-Install aria2 using your distribution's package manager and ensure `aria2c` is available on `PATH`.
+AriaWatch could not locate the aria2 executable.
+
+- On Linux, install aria2 and ensure `aria2c` is available on `PATH`.
+- On Windows portable, ensure `aria2c.exe` is still beside `ariawatch.exe`.
+- On Windows standalone, install aria2 and add its installation directory to `PATH`.
+
+External mode does not require a local aria2 executable.
 
 **Unable to connect to aria2**
 
@@ -148,3 +256,4 @@ For additional help, report reproducible issues through [GitHub Issues](https://
 ## License
 
 AriaWatch is licensed under the [MIT License](LICENSE).
+

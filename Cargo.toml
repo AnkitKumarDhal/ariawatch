@@ -1,7 +1,8 @@
 [package]
 name = "ariawatch"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
+rust-version = "1.89"
 description = "An aria2 based download manager in the terminal"
 license = "MIT"
 repository = "https://github.com/AnkitKumarDhal/ariaWatch"
@@ -19,3 +20,6 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 toml = "1.1.8"
+getrandom = "0.3.4"
+interprocess = "2.4.7"
+widestring = "1"

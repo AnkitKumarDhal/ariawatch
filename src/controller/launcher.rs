@@ -5,6 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINODW: u32 = 0x0800_0000;
+
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -24,11 +30,17 @@ pub(super) fn ensure_running(paths: &AppPaths) -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("Could not locate AriaWatch executable: {error}"))?;
 
-    let mut child = Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .arg("--controller")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINODW);
+
+    let mut child = command
         .spawn()
         .map_err(|error| format!("Could not launch controller: {error}"))?;
 
@@ -64,7 +76,7 @@ pub(super) fn ensure_running(paths: &AppPaths) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::ensure_running;
     use crate::paths::AppPaths;

@@ -1,14 +1,18 @@
 // Just simply (not so simple) writes logs to a file in .local/state/ariawatch.log
+use crate::paths::AppPaths;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::paths::AppPaths;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+#[cfg(windows)]
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 
 const MAX_LOG_SIZE: u64 = 1024 * 1024;
 struct LogFile {
@@ -18,18 +22,49 @@ struct LogFile {
 
 static LOG_FILE: OnceLock<Mutex<LogFile>> = OnceLock::new();
 
+// cross-platform separated code
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+#[cfg(unix)]
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
 fn open_log_file(path: &Path) -> Result<std::fs::File, String> {
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+
+    #[cfg(unix)]
+    options
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+
+    #[cfg(windows)]
+    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+
+    let file = options
         .open(path)
-        .map_err(|error| format!("Could not open log file {}: {error}", path.display()))?;
+        .map_err(|error| format!("COuld not open log file {}: {error}", path.display()))?;
 
     let metadata = file
         .metadata()
         .map_err(|error| format!("Could not inspect log file: {error}"))?;
+
+    if is_reparse_point(&metadata) {
+        return Err(format!(
+            "Log path must not be a symlink or reparse point: {}",
+            path.display()
+        ));
+    }
 
     if !metadata.is_file() {
         return Err(format!(
@@ -38,24 +73,27 @@ fn open_log_file(path: &Path) -> Result<std::fs::File, String> {
         ));
     }
 
-    let current_uid = unsafe { libc::geteuid() };
+    #[cfg(unix)]
+    {
+        let current_uid = unsafe { libc::geteuid() };
 
-    if metadata.uid() != current_uid {
-        return Err(format!(
-            "Log file is not owned by current user: {}",
-            path.display()
-        ));
+        if metadata.uid() != current_uid {
+            return Err(format!(
+                "Log file is not owned by current user: {}",
+                path.display()
+            ));
+        }
+
+        if metadata.nlink() != 1 {
+            return Err(format!(
+                "Log file must not have multiple hard links: {}",
+                path.display()
+            ));
+        }
+
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("Could not secure log file: {error}"))?;
     }
-
-    if metadata.nlink() != 1 {
-        return Err(format!(
-            "Log file must not have multiple hard links: {}",
-            path.display()
-        ));
-    }
-
-    file.set_permissions(fs::Permissions::from_mode(0o600))
-        .map_err(|error| format!("Could not secure log file: {error}"))?;
 
     Ok(file)
 }
@@ -128,6 +166,7 @@ fn rotate_if_needed(log: &mut LogFile) -> bool {
 
     let backup_path = log.path.with_extension("log.1");
 
+    #[cfg(unix)]
     if log
         .file
         .set_permissions(fs::Permissions::from_mode(0o600))

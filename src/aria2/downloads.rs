@@ -542,9 +542,14 @@ mod tests {
 
         assert_eq!(download.name, "Example Torrent");
 
+        let expected_directory = std::path::Path::new("/home/test/Downloads")
+            .join("Example Torrent")
+            .to_string_lossy()
+            .into_owned();
+
         assert_eq!(
             download.directory.as_deref(),
-            Some("/home/test/Downloads/Example Torrent")
+            Some(expected_directory.as_str())
         );
     }
 

@@ -7,11 +7,22 @@ pub use lock::ControllerLock;
 use std::{
     fs::{self, OpenOptions},
     io::{self, Write},
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
+#[cfg(windows)]
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 pub struct ControllerInstance {
     _lock: ControllerLock,
@@ -99,20 +110,28 @@ pub fn run_internal() -> Result<(), String> {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         return Err(String::from(
-            "Background controller startup currently supports only Linux",
+            "Background controller startup currently supports only Linux and Windows",
         ));
     }
 
     let paths = AppPaths::discover()?;
     let _instance = ControllerInstance::acquire(&paths)?;
 
+    #[cfg(unix)]
     let home_dir = std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .ok_or_else(|| String::from("Could not determine the home directory"))?;
+
+    #[cfg(windows)]
+    let home_dir = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| String::from("Could not determine the home directory"))?;
+
     let download_dir = load_download_directory(&paths, &home_dir)?;
 
     let mut aria2 = aria2_process::ManagedAria2::start(&paths, &download_dir)?;
@@ -122,8 +141,16 @@ pub fn run_internal() -> Result<(), String> {
 
 impl Drop for ControllerInstance {
     fn drop(&mut self) {
-        let is_our_pid_file = fs::symlink_metadata(&self.pid_file)
-            .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        let is_regular_file = fs::symlink_metadata(&self.pid_file)
+            .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink());
+
+        #[cfg(windows)]
+        let is_regular_file = is_regular_file
+            && fs::symlink_metadata(&self.pid_file).is_ok_and(|metadata| {
+                metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+            });
+
+        let is_our_pid_file = is_regular_file
             && fs::read_to_string(&self.pid_file)
                 .is_ok_and(|contents| contents.trim() == self.pid.to_string());
 
@@ -145,16 +172,36 @@ fn write_pid_automatically(path: &Path, pid: u32) -> Result<(), String> {
     ));
 
     let result = (|| -> io::Result<()> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+
+        #[cfg(unix)]
+        options
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-            .open(&temp_path)?;
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+
+        #[cfg(windows)]
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+
+        let mut file = options.open(&temp_path)?;
+
+        #[cfg(windows)]
+        {
+            let metadata = file.metadata()?;
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Temporary controller PID file is a reparse point",
+                ));
+            }
+        }
 
         writeln!(file, "{pid}")?;
         file.sync_all()?;
         drop(file);
+
+        #[cfg(windows)]
+        remove_stale_pid_file(path)?;
 
         fs::rename(&temp_path, path)?;
 
@@ -173,16 +220,39 @@ fn write_pid_automatically(path: &Path, pid: u32) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn remove_stale_pid_file(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.is_file()
+                && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 =>
+        {
+            fs::remove_file(path)
+        }
+
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Existing controller PID path is not a regular file",
+        )),
+
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ControllerInstance, load_download_directory};
     use crate::paths::AppPaths;
     use std::{
         fs,
-        os::unix::fs::PermissionsExt,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     fn config_test_paths() -> (PathBuf, AppPaths, PathBuf) {
         let unique_id = SystemTime::now()
@@ -252,6 +322,8 @@ mod tests {
         ));
 
         fs::create_dir(&root).unwrap();
+
+        #[cfg(unix)]
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
 
         let paths = AppPaths {
@@ -305,6 +377,29 @@ mod tests {
         drop(instance);
 
         assert_eq!(fs::read_to_string(&pid_file).unwrap(), "999999\n");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replaces_a_stale_pid_file() {
+        let (root, paths) = test_paths();
+
+        paths.prepare_runtime_dir().unwrap();
+
+        let pid_file = paths.controller_pid_file();
+        fs::write(&pid_file, "12345\n").unwrap();
+
+        let instance = ControllerInstance::acquire(&paths).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&pid_file).unwrap().trim(),
+            std::process::id().to_string()
+        );
+
+        drop(instance);
+
+        assert!(!pid_file.exists());
 
         fs::remove_dir_all(root).unwrap();
     }
