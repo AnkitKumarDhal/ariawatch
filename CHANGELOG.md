@@ -2,6 +2,21 @@
 
 All mentionable changes in AriaWatch are written here.
 
+## [0.5.0] - 24-11-2026
+
+### Added
+- Add Windows x86_64 support
+- Add portable and standalone Windows release packages
+- Bundle aria2 in the Windows portable package
+- Add automated Linux and Windows release packaging
+- Add an Arch Linux PKGBUILD for AUR distribution
+
+### Improved
+- Make controller IPC and process lifecycle handling cross-platform
+- Make application paths, configuration, and logging work on Windows
+- Discover bundled aria2c beside AriaWatch executable, with PATH fallback
+- Expand docs for Windows installation, configuration, persistence and troubleshooting
+
 ## [0.4.0] - 08-11-2026
 
 ### Added
