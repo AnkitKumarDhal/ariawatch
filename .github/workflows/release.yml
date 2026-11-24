@@ -1,0 +1,234 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-version:
+    name: Validate release version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check tag against Cargo.toml
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            echo "Manual build: skipping tag version validation."
+            exit 0
+          fi
+
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_version="$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+
+          if [[ "$tag_version" != "$package_version" ]]; then
+            echo "::error::Tag version $tag_version does not match Cargo.toml version $package_version"
+            exit 1
+          fi
+
+  build-linux:
+    name: Linux - x86_64
+    runs-on: ubuntu-latest
+    needs: validate-version
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package Linux archive
+        shell: bash
+        run: |
+          mkdir -p staging dist
+
+          cp target/release/ariawatch staging/
+          cp LICENSE README.md staging/
+
+          tar -czf "dist/ariawatch-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+            -C staging .
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  build-windows:
+    name: Windows - x86_64
+    runs-on: windows-latest
+    needs: validate-version
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package Windows archives
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          $version = $env:GITHUB_REF_NAME
+          $aria2Version = "1.37.0"
+
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          $staging = Join-Path $env:RUNNER_TEMP "ariawatch-release"
+
+          $portable = Join-Path $staging "portable"
+          $standalone = Join-Path $staging "standalone"
+          $licenses = Join-Path $portable "licenses"
+
+          New-Item -ItemType Directory -Force -Path $dist, $portable, $standalone, $licenses | Out-Null
+
+          # Application files
+          Copy-Item "target\release\ariawatch.exe" $portable
+          Copy-Item "LICENSE" $portable
+          Copy-Item "README.md" $portable
+
+          Copy-Item "target\release\ariawatch.exe" $standalone
+          Copy-Item "LICENSE" $standalone
+          Copy-Item "README.md" $standalone
+
+          # Official aria2 Windows x64 binary
+          $binaryArchiveName = "aria2-$aria2Version-win-64bit-build1.zip"
+          $binaryArchive = Join-Path $env:RUNNER_TEMP $binaryArchiveName
+
+          $binaryUrl = "https://github.com/aria2/aria2/releases/download/release-$aria2Version/$binaryArchiveName"
+
+          Invoke-WebRequest -Uri $binaryUrl -OutFile $binaryArchive
+
+          $expectedHash = "67D015301EEF0B612191212D564C5BB0A14B5B9C4796B76454276A4D28D9B288"
+          $actualHash = (Get-FileHash -Path $binaryArchive -Algorithm SHA256).Hash
+
+          if ($actualHash -ne $expectedHash) {
+            throw "aria2 archive SHA-256 mismatch. Expected $expectedHash but received $actualHash"
+          }
+
+          $extractDir = Join-Path $env:RUNNER_TEMP "aria2-extracted"
+          Expand-Archive -LiteralPath $binaryArchive -DestinationPath $extractDir -Force
+
+          $aria2Executable = Join-Path $extractDir "aria2-1.37.0-win-64bit-build1\aria2c.exe"
+
+          if (-not (Test-Path $aria2Executable -PathType Leaf)) {
+            throw "The expected aria2c.exe was not found in the upstream archive."
+          }
+
+          # Keep aria2c.exe beside ariawatch.exe for bundled discovery.
+          Copy-Item $aria2Executable (Join-Path $portable "aria2c.exe")
+
+          # Preserve the original upstream binary archive.
+          Copy-Item $binaryArchive (Join-Path $licenses $binaryArchiveName)
+
+          # Matching upstream source archive
+          $sourceArchiveName = "aria2-$aria2Version.tar.xz"
+          $sourceArchive = Join-Path $env:RUNNER_TEMP $sourceArchiveName
+
+          $sourceUrl = "https://github.com/aria2/aria2/releases/download/release-$aria2Version/$sourceArchiveName"
+
+          Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceArchive
+
+          Copy-Item $sourceArchive (Join-Path $licenses $sourceArchiveName)
+
+          # Preserve the upstream GPL license text.
+          $copyingUrl = "https://raw.githubusercontent.com/aria2/aria2/release-$aria2Version/COPYING"
+          Invoke-WebRequest -Uri $copyingUrl -OutFile (Join-Path $licenses "aria2-COPYING")
+
+          # Preserve upstream Windows build information.
+          $mingwReadmeUrl = "https://raw.githubusercontent.com/aria2/aria2/release-$aria2Version/README.mingw"
+          Invoke-WebRequest -Uri $mingwReadmeUrl -OutFile (Join-Path $licenses "aria2-README.mingw")
+
+          @"
+          AriaWatch is distributed under the MIT License. See LICENSE.
+
+          Bundled component: aria2 $aria2Version
+          Upstream project: https://github.com/aria2/aria2
+          License: GPL-2.0-or-later
+
+          The bundled aria2c.exe is from the official upstream Windows x64 archive:
+          $binaryUrl
+
+          SHA-256:
+          $expectedHash
+
+          The original upstream archive, corresponding source archive,
+          GPL license text and Windows build information are preserved
+          in this directory.
+          "@ | Set-Content -Path (Join-Path $portable "THIRD-PARTY-NOTICES.txt") -Encoding utf8
+
+          # Create portable package.
+          Compress-Archive `
+            -Path (Join-Path $portable "*") `
+            -DestinationPath (Join-Path $dist "ariawatch-$version-windows-x86_64-portable.zip") `
+            -CompressionLevel Optimal
+
+          # Create standalone package for users with aria2 on PATH.
+          Compress-Archive `
+            -Path (Join-Path $standalone "*") `
+            -DestinationPath (Join-Path $dist "ariawatch-$version-windows-x86_64-standalone.zip") `
+            -CompressionLevel Optimal
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux
+      - build-windows
+
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --generate-notes \
+              --verify-tag
+          fi
